@@ -197,6 +197,25 @@ class RePub {
       }
     }
   }
+    
+  private getNavPointByContent(ncxElement: XMLElement, href: string): XMLElement | null {
+    // First check this navPoint's content
+    const content = ncxElement.getElementsByTagName('content')[0];
+    if (content?.getAttribute('src')?.split('#')[0] === href.split('#')[0]) {
+      return ncxElement;
+    }
+
+    // Then check all child navPoints
+    const childNavPoints = Array.from(ncxElement.getElementsByTagName('navPoint'));
+    for (const navPoint of childNavPoints) {
+      const foundNavPoint = this.getNavPointByContent(navPoint, href);
+      if (foundNavPoint) {
+        return foundNavPoint;
+      }
+    }
+
+    return null;
+  }
 
   async removeContentElement(identifier: string | number): Promise<void> {
     const content = typeof identifier === 'number'
@@ -268,16 +287,15 @@ class RePub {
 
     // Remove from NCX
     if (this.ncx) {
-      const ncxPoints = Array.from(this.ncx.getElementsByTagName('navPoint'));
-      const ncxItem = ncxPoints.find(point => {
-        const contents = point.getElementsByTagName('content');
-        return contents[0]?.getAttribute('src') === content.href;
-      });
-      
-      if (ncxItem?.parentNode) {
-        ncxItem.parentNode.removeChild(ncxItem);
+        const topLevelNavPoints = Array.from(this.ncx.getElementsByTagName('navPoint'));
+        for (const navPoint of topLevelNavPoints) {
+          const targetNavPoint = this.getNavPointByContent(navPoint, content.href);
+          if (targetNavPoint?.parentNode) {
+            targetNavPoint.parentNode.removeChild(targetNavPoint);
+            break; // Found and removed the navPoint, no need to continue
+          }
+        }
       }
-    }
 
     // Update contents list
     await this.buildContentsList();
@@ -286,6 +304,68 @@ class RePub {
   async removeContents(identifiers: (string | number)[]): Promise<void> {
     for (const identifier of identifiers) {
       await this.removeContentElement(identifier);
+    }
+  }
+    
+  /**
+   * Removes a range of content elements.
+   * @param range String representing the range to remove.
+   *              Format: "n..." for elements from index n onwards
+   *                      "n..m" for elements from index n to m inclusive
+   * @throws Error if the range format is invalid or if indices are out of bounds
+   */
+  async removeContentRange(range: string): Promise<void> {
+    const parseRange = (rangeStr: string): [number, number | null] => {
+      // Check for "n..." format
+      if (rangeStr.endsWith('...')) {
+        const start = parseInt(rangeStr.slice(0, -3), 10);
+        if (isNaN(start)) {
+          throw new Error('Invalid range format. Expected "n..." or "n..m"');
+        }
+        return [start, null];
+      }
+      
+      // Check for "n..m" format
+      const parts = rangeStr.split('..');
+      if (parts.length !== 2) {
+        throw new Error('Invalid range format. Expected "n..." or "n..m"');
+      }
+      
+      const start = parseInt(parts[0], 10);
+      const end = parseInt(parts[1], 10);
+      
+      if (isNaN(start) || isNaN(end)) {
+        throw new Error('Invalid range format. Expected numbers for start and end');
+      }
+      
+      return [start, end];
+    };
+
+    // Parse and validate the range
+    const [start, end] = parseRange(range);
+    
+    // Validate start index
+    if (start < 0 || start >= this.contents.length) {
+      throw new Error(`Start index ${start} is out of bounds`);
+    }
+
+    // Calculate end index
+    const endIndex = end !== null ? end : this.contents.length - 1;
+    
+    // Validate end index
+    if (endIndex < start || endIndex >= this.contents.length) {
+      throw new Error(`End index ${endIndex} is invalid or out of bounds`);
+    }
+
+    // Collect all elements to remove
+      const elementsToRemove = this.contents.slice(start, endIndex + 1);
+      
+      console.log(elementsToRemove)
+
+    // Remove elements by their id rather than index
+      for (const element of elementsToRemove) {
+        console.log("removing", element)
+      await this.removeContentElement(element.id);
     }
   }
 

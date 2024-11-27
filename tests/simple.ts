@@ -10,7 +10,7 @@ async function testEpub(epubPath: string) {
         contents.forEach((item, index) => {
             console.log(`${index}. ${item.label} (${item.href})`);
         });
-        epub.removeContentElement(15);
+        epub.removeContentRange('3...')
         await epub.saveAs( `sampler-${Date.now()}.epub`)
     } catch (error) {
         console.error('Error:', error);
