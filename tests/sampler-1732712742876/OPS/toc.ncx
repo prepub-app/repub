@@ -1,0 +1,325 @@
+<ncx version="2005-1" xml:lang="en" xmlns="http://www.daisy.org/z3986/2005/ncx/">
+	<head>
+		<meta name="dtb:uid" content="urn:uuid:47353553-8039-42C0-91C6-55CE4A3FB351"/>
+		<meta name="dtb:depth" content="2"/>
+		<meta name="dtb:totalPageCount" content="0"/>
+		<meta name="dtb:maxPageNumber" content="0"/>
+	</head>
+
+	<docTitle>
+		<text>Remote Kill</text>
+	</docTitle>
+	
+	<docAuthor>
+		<text>Ethan Bolt</text>
+	</docAuthor>
+
+	<navMap>
+		<navPoint class="h1" id="1-into-the-chaos">
+			<navLabel>
+				<text>1. Into the Chaos</text>
+			</navLabel>
+			<content src="chapter-1.xhtml#1-into-the-chaos"/>
+		</navPoint>
+		<navPoint class="h1" id="2-lecture">
+			<navLabel>
+				<text>2. Lecture</text>
+			</navLabel>
+			<content src="chapter-2.xhtml#2-lecture"/>
+		</navPoint>
+		<navPoint class="h1" id="3-beers">
+			<navLabel>
+				<text>3. Beers</text>
+			</navLabel>
+			<content src="chapter-3.xhtml#3-beers"/>
+		</navPoint>
+		<navPoint class="h1" id="4-newsroom">
+			<navLabel>
+				<text>4. Newsroom</text>
+			</navLabel>
+			<content src="chapter-4.xhtml#4-newsroom"/>
+		</navPoint>
+		<navPoint class="h1" id="5-pentagon">
+			<navLabel>
+				<text>5. Pentagon</text>
+			</navLabel>
+			<content src="chapter-5.xhtml#5-pentagon"/>
+		</navPoint>
+		<navPoint class="h1" id="6-briefing">
+			<navLabel>
+				<text>6. Briefing</text>
+			</navLabel>
+			<content src="chapter-6.xhtml#6-briefing"/>
+		</navPoint>
+		<navPoint class="h1" id="7-ramifications">
+			<navLabel>
+				<text>7. Ramifications</text>
+			</navLabel>
+			<content src="chapter-7.xhtml#7-ramifications"/>
+		</navPoint>
+		<navPoint class="h1" id="8-suspect">
+			<navLabel>
+				<text>8. Suspect</text>
+			</navLabel>
+			<content src="chapter-8.xhtml#8-suspect"/>
+		</navPoint>
+		<navPoint class="h1" id="9-spartan">
+			<navLabel>
+				<text>9. Spartan</text>
+			</navLabel>
+			<content src="chapter-9.xhtml#9-spartan"/>
+		</navPoint>
+		<navPoint class="h1" id="10-melee">
+			<navLabel>
+				<text>10. Melee</text>
+			</navLabel>
+			<content src="chapter-10.xhtml#10-melee"/>
+		</navPoint>
+		<navPoint class="h1" id="11-appointment">
+			<navLabel>
+				<text>11. Appointment</text>
+			</navLabel>
+			<content src="chapter-11.xhtml#11-appointment"/>
+		</navPoint>
+		<navPoint class="h1" id="12-reunion">
+			<navLabel>
+				<text>12. Reunion</text>
+			</navLabel>
+			<content src="chapter-12.xhtml#12-reunion"/>
+		</navPoint>
+		<navPoint class="h1" id="13-debriefing">
+			<navLabel>
+				<text>13. Debriefing</text>
+			</navLabel>
+			<content src="chapter-13.xhtml#13-debriefing"/>
+		</navPoint>
+		<navPoint class="h1" id="14-travel">
+			<navLabel>
+				<text>14. Travel</text>
+			</navLabel>
+			<content src="chapter-14.xhtml#14-travel"/>
+		</navPoint>
+		<navPoint class="h1" id="15-sarah">
+			<navLabel>
+				<text>15. Sarah</text>
+			</navLabel>
+			<content src="chapter-15.xhtml#15-sarah"/>
+			<navPoint class="h2" id="twelve-months-ago-thousands-of-miles-away">
+				<navLabel>
+					<text>Twelve months ago, thousands of miles away</text>
+				</navLabel>
+				<content src="chapter-15.xhtml#twelve-months-ago-thousands-of-miles-away"/>
+			</navPoint>
+		</navPoint>
+		<navPoint class="h1" id="16-traumatized">
+			<navLabel>
+				<text>16. Traumatized</text>
+			</navLabel>
+			<content src="chapter-16.xhtml#16-traumatized"/>
+		</navPoint>
+		<navPoint class="h1" id="17-welcome-to-the-woods">
+			<navLabel>
+				<text>17. Welcome to the Woods</text>
+			</navLabel>
+			<content src="chapter-17.xhtml#17-welcome-to-the-woods"/>
+		</navPoint>
+		<navPoint class="h1" id="18-addressing-the-nation">
+			<navLabel>
+				<text>18. Addressing the Nation</text>
+			</navLabel>
+			<content src="chapter-18.xhtml#18-addressing-the-nation"/>
+		</navPoint>
+		<navPoint class="h1" id="19-witness">
+			<navLabel>
+				<text>19. Witness</text>
+			</navLabel>
+			<content src="chapter-19.xhtml#19-witness"/>
+		</navPoint>
+		<navPoint class="h1" id="20-interview">
+			<navLabel>
+				<text>20. Interview</text>
+			</navLabel>
+			<content src="chapter-20.xhtml#20-interview"/>
+		</navPoint>
+		<navPoint class="h1" id="21-waves">
+			<navLabel>
+				<text>21. Waves</text>
+			</navLabel>
+			<content src="chapter-21.xhtml#21-waves"/>
+		</navPoint>
+		<navPoint class="h1" id="22-sidelined">
+			<navLabel>
+				<text>22. Sidelined</text>
+			</navLabel>
+			<content src="chapter-22.xhtml#22-sidelined"/>
+		</navPoint>
+		<navPoint class="h1" id="23-watchers">
+			<navLabel>
+				<text>23. Watchers</text>
+			</navLabel>
+			<content src="chapter-23.xhtml#23-watchers"/>
+		</navPoint>
+		<navPoint class="h1" id="24-swarm">
+			<navLabel>
+				<text>24. Swarm</text>
+			</navLabel>
+			<content src="chapter-24.xhtml#24-swarm"/>
+		</navPoint>
+		<navPoint class="h1" id="25-high-level">
+			<navLabel>
+				<text>25. High Level</text>
+			</navLabel>
+			<content src="chapter-25.xhtml#25-high-level"/>
+		</navPoint>
+		<navPoint class="h1" id="26-killian-court">
+			<navLabel>
+				<text>26. Killian Court</text>
+			</navLabel>
+			<content src="chapter-26.xhtml#26-killian-court"/>
+		</navPoint>
+		<navPoint class="h1" id="27-prepping">
+			<navLabel>
+				<text>27. Prepping</text>
+			</navLabel>
+			<content src="chapter-27.xhtml#27-prepping"/>
+		</navPoint>
+		<navPoint class="h1" id="28-identification">
+			<navLabel>
+				<text>28. Identification</text>
+			</navLabel>
+			<content src="chapter-28.xhtml#28-identification"/>
+		</navPoint>
+		<navPoint class="h1" id="29-road-trip">
+			<navLabel>
+				<text>29. Road Trip</text>
+			</navLabel>
+			<content src="chapter-29.xhtml#29-road-trip"/>
+		</navPoint>
+		<navPoint class="h1" id="30-barn-door">
+			<navLabel>
+				<text>30. Barn Door</text>
+			</navLabel>
+			<content src="chapter-30.xhtml#30-barn-door"/>
+		</navPoint>
+		<navPoint class="h1" id="31-research">
+			<navLabel>
+				<text>31. Research</text>
+			</navLabel>
+			<content src="chapter-31.xhtml#31-research"/>
+		</navPoint>
+		<navPoint class="h1" id="32-going-public">
+			<navLabel>
+				<text>32. Going Public</text>
+			</navLabel>
+			<content src="chapter-32.xhtml#32-going-public"/>
+		</navPoint>
+		<navPoint class="h1" id="33-tavern">
+			<navLabel>
+				<text>33. Tavern</text>
+			</navLabel>
+			<content src="chapter-33.xhtml#33-tavern"/>
+		</navPoint>
+		<navPoint class="h1" id="34-chow">
+			<navLabel>
+				<text>34. Chow</text>
+			</navLabel>
+			<content src="chapter-34.xhtml#34-chow"/>
+		</navPoint>
+		<navPoint class="h1" id="35-out-of-reservation">
+			<navLabel>
+				<text>35. Out of Reservation</text>
+			</navLabel>
+			<content src="chapter-35.xhtml#35-out-of-reservation"/>
+		</navPoint>
+		<navPoint class="h1" id="36-close-encounters">
+			<navLabel>
+				<text>36. Close Encounters</text>
+			</navLabel>
+			<content src="chapter-36.xhtml#36-close-encounters"/>
+		</navPoint>
+		<navPoint class="h1" id="37-burning-wood">
+			<navLabel>
+				<text>37. Burning Wood</text>
+			</navLabel>
+			<content src="chapter-37.xhtml#37-burning-wood"/>
+		</navPoint>
+		<navPoint class="h1" id="38-revelations">
+			<navLabel>
+				<text>38. Revelations</text>
+			</navLabel>
+			<content src="chapter-38.xhtml#38-revelations"/>
+		</navPoint>
+		<navPoint class="h1" id="39-loose-ends">
+			<navLabel>
+				<text>39. Loose Ends</text>
+			</navLabel>
+			<content src="chapter-39.xhtml#39-loose-ends"/>
+		</navPoint>
+		<navPoint class="h1" id="40-obstacles">
+			<navLabel>
+				<text>40. Obstacles</text>
+			</navLabel>
+			<content src="chapter-40.xhtml#40-obstacles"/>
+		</navPoint>
+		<navPoint class="h1" id="41-missions">
+			<navLabel>
+				<text>41. Missions</text>
+			</navLabel>
+			<content src="chapter-41.xhtml#41-missions"/>
+		</navPoint>
+		<navPoint class="h1" id="42-linking-up">
+			<navLabel>
+				<text>42. Linking up</text>
+			</navLabel>
+			<content src="chapter-42.xhtml#42-linking-up"/>
+		</navPoint>
+		<navPoint class="h1" id="43-the-bucket-ends">
+			<navLabel>
+				<text>43. The Bucket Ends</text>
+			</navLabel>
+			<content src="chapter-43.xhtml#43-the-bucket-ends"/>
+		</navPoint>
+		<navPoint class="h1" id="44-insights">
+			<navLabel>
+				<text>44. Insights</text>
+			</navLabel>
+			<content src="chapter-44.xhtml#44-insights"/>
+		</navPoint>
+		<navPoint class="h1" id="45-change-of-plans">
+			<navLabel>
+				<text>45. Change of Plans</text>
+			</navLabel>
+			<content src="chapter-45.xhtml#45-change-of-plans"/>
+		</navPoint>
+		<navPoint class="h1" id="46-in-the-air">
+			<navLabel>
+				<text>46. In the Air</text>
+			</navLabel>
+			<content src="chapter-46.xhtml#46-in-the-air"/>
+		</navPoint>
+		<navPoint class="h1" id="47-arrested">
+			<navLabel>
+				<text>47. Arrested</text>
+			</navLabel>
+			<content src="chapter-47.xhtml#47-arrested"/>
+		</navPoint>
+		<navPoint class="h1" id="48-stocktaking">
+			<navLabel>
+				<text>48. Stocktaking</text>
+			</navLabel>
+			<content src="chapter-48.xhtml#48-stocktaking"/>
+		</navPoint>
+		<navPoint class="h1" id="49-in-position">
+			<navLabel>
+				<text>49. In Position</text>
+			</navLabel>
+			<content src="chapter-49.xhtml#49-in-position"/>
+		</navPoint>
+		<navPoint class="h1" id="50-assault">
+			<navLabel>
+				<text>50. Assault</text>
+			</navLabel>
+			<content src="chapter-50.xhtml#50-assault"/>
+		</navPoint>
+	</navMap>
+</ncx>
