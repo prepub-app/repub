@@ -3,27 +3,42 @@ import path from 'path';
 import axios from 'axios';
 import JSZip from 'jszip';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
-import { parseString } from 'xml2js';
+import format from 'xml-formatter';
 
 // Node Types
 interface XMLNode {
     nodeType: number;
     nodeName: string;
-    getAttribute: (name: string) => string | null;
-    getElementsByTagName: (name: string) => XMLElement[];
     textContent: string | null;
+    getAttribute: (name: string) => string | null;
+    setAttribute: (name: string, value: string) => void;
+    getElementsByTagName: (name: string) => XMLElement[];
     parentNode: XMLElement | null;
     removeChild: (child: XMLElement) => void;
+    appendChild: (child: XMLElement) => XMLElement;
     childNodes: NodeListOf<XMLElement>;
   }
   
   interface XMLElement extends XMLNode {
     ownerDocument: XMLDocument;
     children: HTMLCollection;
+    attributes: NamedNodeMap;
   }
   
   interface XMLDocument extends XMLNode {
     documentElement: XMLElement;
+    createElement: (tagName: string) => XMLElement;
+  }
+  
+  interface NamedNodeMap {
+    length: number;
+    item: (index: number) => Attr | null;
+    [index: number]: Attr;
+  }
+  
+  interface Attr {
+    name: string;
+    value: string;
   }
   
   interface HTMLCollection {
@@ -47,6 +62,8 @@ interface ContentElement {
   }
 
 class RePub {
+
+  private static readonly VERSION = '1.0.0';
   private zip!: JSZip;
   private contentPath: string = '';
   private spine: XMLElement | null = null;
@@ -56,7 +73,6 @@ class RePub {
   private contents: ContentElement[] = [];
 
   constructor() {
-    //this.zip = new JSZip();
   }
 
   async open(location: string): Promise<void> {
@@ -259,21 +275,6 @@ class RePub {
   listContents(): ContentElement[] {
     return this.contents;
   }
-
- /* private findContentElementByIndex(index: number, elements: ContentElement[] = this.contents): ContentElement | null {
-    for (const element of elements) {
-      if (element.index === index) {
-        return element;
-      }
-      if (element.children) {
-        const found = this.findContentElementByIndex(index, element.children);
-        if (found) {
-          return found;
-        }
-      }
-    }
-    return null;
-  }*/
     
 /**
    * Removes a range of content elements.
@@ -490,113 +491,112 @@ async removeContentRange(range: string): Promise<void> {
     await this.buildContentsList();
   }
 
-  /*async removeContentElement(identifier: string | number): Promise<void> {
-    const content = typeof identifier === 'number'
-      ? this.contents[identifier]
-        : this.contents.find(c => c.id === identifier);
-
-    if (!content || !content.href) {
-      throw new Error('Content element not found');
-    }
-
-    // Remove from zip
-    const contentPath = path.join(path.dirname(this.contentPath), content.href.split('#')[0]);
-    this.zip.remove(contentPath);
-
-    if (!this.manifest || !this.spine) {
-      throw new Error('Invalid EPUB structure');
-    }
-
-    // Remove from manifest
-    const manifestItems = Array.from(this.manifest.getElementsByTagName('item'));
-    const manifestItem = manifestItems.find(
-      item => item.getAttribute('href') === content.href
-    );
-
-    if (manifestItem?.parentNode) {
-      manifestItem.parentNode.removeChild(manifestItem);
-    }
-
-    // Remove from spine
-    const manifestId = manifestItem?.getAttribute('id');
-    if (manifestId) {
-      const spineItems = Array.from(this.spine.getElementsByTagName('itemref'));
-      const spineItem = spineItems.find(
-        item => item.getAttribute('idref') === manifestId
-      );
-      if (spineItem?.parentNode) {
-        spineItem.parentNode.removeChild(spineItem);
-      }
-    }
-
-    // Remove from navigation document
-    if (this.navigation) {
-        // First try to find an <a> element with matching href
-        const navAnchors = Array.from(this.navigation.getElementsByTagName('a'));
-        const navAnchor = navAnchors.find(
-          a => a.getAttribute('href') === content.href
-        );
-        
-        if (navAnchor) {
-          this.removeNavigationItem(navAnchor);
-        } else {
-          // If no matching <a> found, check for spans that might be related
-          // (e.g., if this is a section being removed that has a span header)
-          const navSpans = Array.from(this.navigation.getElementsByTagName('span'));
-          for (const span of navSpans) {
-            // Check if this span's subsections contain our target
-            const nestedAnchors = Array.from(span.parentNode?.getElementsByTagName('a') || []);
-            const hasTargetContent = nestedAnchors.some(
-              a => a.getAttribute('href') === content.href
-            );
-            
-            if (hasTargetContent) {
-              this.removeNavigationItem(span);
-              break;
-            }
-          }
-        }
-      }
-
-    // Remove from NCX
-    if (this.ncx) {
-        const topLevelNavPoints = Array.from(this.ncx.getElementsByTagName('navPoint'));
-        for (const navPoint of topLevelNavPoints) {
-          const targetNavPoint = this.getNavPointByContent(navPoint, content.href);
-          if (targetNavPoint?.parentNode) {
-            targetNavPoint.parentNode.removeChild(targetNavPoint);
-            break; // Found and removed the navPoint, no need to continue
-          }
-        }
-      }
-
-    // Update contents list
-    await this.buildContentsList();
-  }
-  */
-
   async removeContents(identifiers: (string | number)[]): Promise<void> {
     for (const identifier of identifiers) {
       await this.removeContentElement(identifier);
     }
+  }
+    
+  private normalizeWhitespace(element: XMLElement): void {
+    // Convert childNodes to array for safe iteration
+    const children = Array.from(element.childNodes);
+    
+    for (const child of children) {
+      if (child.nodeType === 3) { // Text node
+        // If it's empty or just whitespace, remove it
+        if (!child.textContent?.trim()) {
+          element.removeChild(child);
+        } else {
+          // Normalize whitespace in non-empty text nodes
+          child.textContent = child.textContent.replace(/\s+/g, ' ').trim();
+        }
+      } else if (child.nodeType === 1) { // Element node
+        this.normalizeWhitespace(child as XMLElement);
+      }
+    }
+  }
+    
+  private updateMetadata(): void {
+    if (!this.manifest?.ownerDocument) return;
+    
+    const doc = this.manifest.ownerDocument as XMLDocument;
+    const metadata = doc.getElementsByTagName('metadata')[0];
+    if (!metadata) return;
+
+    const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const currentDateTime = new Date().toISOString().replace(/\.\d+Z$/, 'Z'); // Remove milliseconds
+    
+    // Update or add contributor
+    const contributors = metadata.getElementsByTagName('dc:contributor');
+    let contributorElement: XMLElement | null = null;
+    
+    // Look for existing rePub contributor
+    for (const contrib of Array.from(contributors)) {
+      if (contrib.textContent?.includes('rePub')) {
+        contributorElement = contrib;
+        break;
+      }
+    }
+
+    if (!contributorElement) {
+      // Create new contributor element
+      contributorElement = doc.createElement('dc:contributor');
+      contributorElement.setAttribute('id', 'contributor');
+      metadata.appendChild(contributorElement);
+      
+      // Create role meta element
+      const roleMeta = doc.createElement('meta');
+      roleMeta.setAttribute('refines', '#contributor');
+      roleMeta.setAttribute('property', 'role');
+      roleMeta.setAttribute('scheme', 'marc:relators');
+      roleMeta.textContent = 'bkp';
+      metadata.appendChild(roleMeta);
+    }
+    
+    contributorElement.textContent = `rePub ${RePub.VERSION}`;
+
+    // Update or add date
+    let dateElement = metadata.getElementsByTagName('dc:date')[0];
+    if (!dateElement) {
+      dateElement = doc.createElement('dc:date');
+      metadata.appendChild(dateElement);
+    }
+    dateElement.textContent = currentDate;
+
+    // Update or add modified date
+    let modifiedElement = Array.from(metadata.getElementsByTagName('meta'))
+      .find(meta => meta.getAttribute('property') === 'dcterms:modified');
+      
+    if (!modifiedElement) {
+      modifiedElement = doc.createElement('meta');
+      modifiedElement.setAttribute('property', 'dcterms:modified');
+      metadata.appendChild(modifiedElement);
+    }
+    modifiedElement.textContent = currentDateTime;
   }
 
   async saveAs(location: string): Promise<void> {
     if (!this.manifest || !this.spine) {
       throw new Error('Invalid EPUB structure');
     }
+      
+    // Update metadata before saving
+    this.updateMetadata();
 
     // Update content.opf
     const serializer = new XMLSerializer();
+    this.normalizeWhitespace(this.manifest.ownerDocument.documentElement);
     const contentOpfPath = this.contentPath;
-    const contentOpfContent = serializer.serializeToString(this.manifest.ownerDocument.documentElement as unknown as Node);
-      this.zip.file(contentOpfPath, contentOpfContent, {
-          compression: 'DEFLATE',
-          compressionOptions: {
-              level: 9
-          }
-      }
+    const contentOpfContent = format(
+      serializer.serializeToString(this.manifest.ownerDocument.documentElement as unknown as Node),
+      { indentation: '  ', collapseContent: true }
     );
+    this.zip.file(contentOpfPath, contentOpfContent, {
+      compression: 'DEFLATE',
+      compressionOptions: {
+        level: 9
+      }
+    });
 
     // Update navigation document if it exists
     if (this.navigation) {
@@ -609,13 +609,17 @@ async removeContentRange(range: string): Promise<void> {
         const href = navItem.getAttribute('href');
         if (href) {
           const navPath = path.join(path.dirname(this.contentPath), href);
-          const navContent = serializer.serializeToString(this.navigation.documentElement as unknown as Node);
+          this.normalizeWhitespace(this.navigation.documentElement);
+          const navContent = format(
+            serializer.serializeToString(this.navigation.documentElement as unknown as Node),
+            { indentation: '  ', collapseContent: true }
+          );
           this.zip.file(navPath, navContent, {
             compression: 'DEFLATE',
             compressionOptions: {
-                level: 9
+              level: 9
             }
-        });
+          });
         }
       }
     }
@@ -631,23 +635,26 @@ async removeContentRange(range: string): Promise<void> {
         const href = ncxItem.getAttribute('href');
         if (href) {
           const ncxPath = path.join(path.dirname(this.contentPath), href);
-          const ncxContent = serializer.serializeToString(this.ncx.documentElement as unknown as Node);
+          this.normalizeWhitespace(this.ncx.documentElement);
+          const ncxContent = format(
+            serializer.serializeToString(this.ncx.documentElement as unknown as Node),
+            { indentation: '  ', collapseContent: true }
+          );
           this.zip.file(ncxPath, ncxContent, {
             compression: 'DEFLATE',
             compressionOptions: {
-                level: 9
+              level: 9
             }
-        });
+          });
         }
       }
     }
 
     // Generate EPUB file
-      const content = await this.zip.generateAsync({
-          type: 'nodebuffer',
-     });
+    const content = await this.zip.generateAsync({ type: 'nodebuffer' });
     await fs.promises.writeFile(location, content);
   }
+    
 }
 
 export default RePub;
