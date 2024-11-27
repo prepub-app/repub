@@ -4,6 +4,7 @@ import axios from 'axios';
 import JSZip from 'jszip';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import format from 'xml-formatter';
+import MarkdownIt from 'markdown-it';
 
 // Node Types
 interface XMLNode {
@@ -16,6 +17,7 @@ interface XMLNode {
     parentNode: XMLElement | null;
     removeChild: (child: XMLElement) => void;
     appendChild: (child: XMLElement) => XMLElement;
+    insertBefore: (newNode: XMLElement, referenceNode: XMLElement) => XMLElement;
     childNodes: NodeListOf<XMLElement>;
   }
   
@@ -28,6 +30,8 @@ interface XMLNode {
   interface XMLDocument extends XMLNode {
     documentElement: XMLElement;
     createElement: (tagName: string) => XMLElement;
+    createElementNS: (namespace: string | null, qualifiedName: string) => XMLElement;
+    createTextNode: (data: string) => XMLNode;
   }
   
   interface NamedNodeMap {
@@ -59,12 +63,19 @@ interface ContentElement {
     href: string;
     index: number;
     children?: ContentElement[];
+}
+  
+interface ContentOptions {
+    id?: string;          // Custom ID for the content
+    title?: string;       // Title for navigation
+    type?: 'html' | 'md'; // Content type, defaults to 'html'
   }
 
 class RePub {
 
   private static readonly VERSION = '1.0.0';
-  private zip!: JSZip;
+    private zip!: JSZip;
+    private md: MarkdownIt;
   private contentPath: string = '';
   private spine: XMLElement | null = null;
   private manifest: XMLElement | null = null;
@@ -72,7 +83,11 @@ class RePub {
   private ncx: XMLDocument | null = null;
   private contents: ContentElement[] = [];
 
-  constructor() {
+    constructor() {
+        this.md = new MarkdownIt({
+            html: true,
+            xhtmlOut: true  // Important for EPUB compatibility
+          });
   }
 
   async open(location: string): Promise<void> {
@@ -375,7 +390,7 @@ async removeContentRange(range: string): Promise<void> {
     }
   }
     
-  private getNavPointByContent(ncxElement: XMLElement, href: string): XMLElement | null {
+ /* private getNavPointByContent(ncxElement: XMLElement, href: string): XMLElement | null {
     // First check this navPoint's content
     const content = ncxElement.getElementsByTagName('content')[0];
     if (content?.getAttribute('src')?.split('#')[0] === href.split('#')[0]) {
@@ -392,7 +407,7 @@ async removeContentRange(range: string): Promise<void> {
     }
 
     return null;
-  }
+  }*/
     
   private removeFromNavigation(href: string): void {
     if (!this.navigation) return;
@@ -653,6 +668,134 @@ async removeContentRange(range: string): Promise<void> {
     // Generate EPUB file
     const content = await this.zip.generateAsync({ type: 'nodebuffer' });
     await fs.promises.writeFile(location, content);
+  }
+    
+  private generateUniqueId(prefix: string = 'content'): string {
+    const timestamp = new Date().getTime();
+    const random = Math.floor(Math.random() * 10000);
+    return `${prefix}-${timestamp}-${random}`;
+  }
+
+  private createXhtmlWrapper(content: string, title?: string): string {
+    return `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+  <head>
+    <title>${title || 'New Content'}</title>
+  </head>
+  <body>
+    ${content}
+  </body>
+</html>`;
+  }
+
+  private async insertContentAtIndex(content: string, index: number, options: ContentOptions = {}): Promise<void> {
+    if (!this.manifest || !this.spine) {
+      throw new Error('EPUB not loaded');
+    }
+
+    const doc = this.manifest.ownerDocument as XMLDocument;
+
+    // Convert markdown if needed
+    const htmlContent = options.type === 'md' ? this.md.render(content) : content;
+    
+    // Generate file name and ID
+    const id = options.id || this.generateUniqueId();
+    const fileName = `${id}.xhtml`;
+    const filePath = path.join(path.dirname(this.contentPath), fileName);
+    
+    // Create full XHTML document
+    const xhtmlContent = this.createXhtmlWrapper(htmlContent, options.title);
+
+    // Add to ZIP
+    this.zip.file(filePath, xhtmlContent);
+
+    // Add to manifest
+    const manifestItem = doc.createElement('item');
+    manifestItem.setAttribute('id', id);
+    manifestItem.setAttribute('href', fileName);
+    manifestItem.setAttribute('media-type', 'application/xhtml+xml');
+    this.manifest.appendChild(manifestItem);
+
+    // Add to spine
+    const spineItem = doc.createElement('itemref');
+    spineItem.setAttribute('idref', id);
+    
+    // Insert at specific position in spine
+    const spineItems = this.spine.getElementsByTagName('itemref');
+    if (index >= spineItems.length) {
+      this.spine.appendChild(spineItem);
+    } else {
+      const referenceItem = spineItems[index];
+      this.spine.insertBefore(spineItem, referenceItem);
+    }
+
+    // Add to navigation
+    if (this.navigation) {
+      const navDoc = this.navigation as XMLDocument;
+      const navList = navDoc.getElementsByTagName('ol')[0];
+      if (navList) {
+        const li = navDoc.createElement('li');
+        const a = navDoc.createElement('a');
+        a.setAttribute('href', fileName);
+        a.textContent = options.title || `Content ${id}`;
+        li.appendChild(a);
+
+        const navItems = navList.getElementsByTagName('li');
+        if (index >= navItems.length) {
+          navList.appendChild(li);
+        } else {
+          navList.insertBefore(li, navItems[index]);
+        }
+      }
+    }
+
+    // Update NCX if it exists
+    if (this.ncx) {
+      const ncxDoc = this.ncx as XMLDocument;
+      const navMap = ncxDoc.getElementsByTagName('navMap')[0];
+      if (navMap) {
+        const navPoint = ncxDoc.createElement('navPoint');
+        const navLabel = ncxDoc.createElement('navLabel');
+        const text = ncxDoc.createElement('text');
+        const contentElement = ncxDoc.createElement('content');
+
+        text.textContent = options.title || `Content ${id}`;
+        contentElement.setAttribute('src', fileName);
+
+        navLabel.appendChild(text);
+        navPoint.appendChild(navLabel);
+        navPoint.appendChild(contentElement);
+
+        // Add playOrder if it exists in other navPoints
+        const existingNavPoints = navMap.getElementsByTagName('navPoint');
+        if (existingNavPoints[0]?.getAttribute('playOrder')) {
+          navPoint.setAttribute('playOrder', (index + 1).toString());
+        }
+
+        if (index >= existingNavPoints.length) {
+          navMap.appendChild(navPoint);
+        } else {
+          navMap.insertBefore(navPoint, existingNavPoints[index]);
+        }
+      }
+    }
+
+    // Rebuild contents list
+    await this.buildContentsList();
+  }
+
+  async insertContent(content: string, at: number, options: ContentOptions = {}): Promise<void> {
+    await this.insertContentAtIndex(content, at, options);
+  }
+
+  async appendContent(content: string, options: ContentOptions = {}): Promise<void> {
+    const lastIndex = this.contents.length;
+    await this.insertContentAtIndex(content, lastIndex, options);
+  }
+
+  async prependContent(content: string, options: ContentOptions = {}): Promise<void> {
+    await this.insertContentAtIndex(content, 0, options);
   }
     
 }
