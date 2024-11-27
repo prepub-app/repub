@@ -1,0 +1,188 @@
+<package xmlns="http://www.idpf.org/2007/opf" xml:lang="en" prefix="ibooks: http://vocabulary.itunes.apple.com/rdf/ibooks/vocabulary-extensions-1.0/ schema: http://schema.org/" unique-identifier="pub-id" version="3.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title id="title">Remote Kill: A Vanguard Thriller</dc:title>
+    <dc:creator id="creator">Carl Decker</dc:creator>
+    <meta refines="#creator" property="role" scheme="marc:relators">aut</meta>
+    <meta refines="#creator" property="file-as">Decker, Carl</meta>
+    <dc:language>en</dc:language>
+    <dc:identifier id="pub-id">urn:uuid:AD13B1F5-E707-4012-9301-6919D4C71BF6</dc:identifier>
+    <meta refines="#pub-id" scheme="xsd:string" property="identifier-type">uuid</meta>
+    <meta property="dcterms:modified">2024-10-21T10:27:51Z</meta>
+    <meta property="ibooks:specified-fonts">true</meta>
+    <meta property="schema:accessMode">textual</meta>
+    <meta property="schema:accessMode">visual</meta>
+    <meta property="schema:accessModeSufficient">textual,visual</meta>
+    <meta property="schema:accessModeSufficient">textual</meta>
+    <meta property="schema:accessibilityFeature">structuralNavigation</meta>
+    <meta property="schema:accessibilityFeature">tableOfContents</meta>
+    <meta property="schema:accessibilityFeature">readingOrder</meta>
+    <meta property="schema:accessibilityFeature">alternativeText</meta>
+    <meta property="schema:accessibilityHazard">none</meta>
+    <meta property="schema:accessibilitySummary">The structure and markup of this publication follow WCAG guidelines. Images used in this publication have not been verified to follow these guidelines. Images integral to the content include alternate text descriptions. This summary has been automatically generated based on the content of this publication.</meta>
+    <meta name="generator" content="Vellum"/>
+    <meta name="vellum-version" content="3.8.1"/>
+    <meta name="vellum-target-platform" content="Kindle"/>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="toc" properties="nav" href="toc.xhtml" media-type="application/xhtml+xml"/>
+    <item id="title-xhtml" href="title.xhtml" media-type="application/xhtml+xml"/>
+    <item id="copyright-xhtml" href="copyright.xhtml" media-type="application/xhtml+xml"/>
+    <item id="contents-xhtml" href="contents.xhtml" media-type="application/xhtml+xml"/>
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    <item id="bebasneue-regular-ttf" href="fonts/BebasNeue-Regular.ttf" media-type="font/ttf"/>
+    <item id="montserrat-regular-ttf" href="fonts/Montserrat-Regular.ttf" media-type="font/ttf"/>
+    <item id="cover-image" properties="cover-image" href="images/remote-kill.jpg" media-type="image/jpeg"/>
+    <item id="image2-png" href="images/image2.png" media-type="image/png"/>
+    <item id="schmutztitel-png" href="images/schmutztitel.png" media-type="image/png"/>
+    <item id="break-dinkus-palatino-screen-svg" href="images/break-dinkus-palatino-screen.svg" media-type="image/svg+xml"/>
+    <item id="vellum-created-svg" href="images/vellum-created.svg" media-type="image/svg+xml"/>
+    <item id="media-css" href="css/media.css" media-type="text/css"/>
+    <item id="style-css" href="css/style.css" media-type="text/css"/>
+    <item id="sil-open-font-license-11-txt" href="fonts/SIL-Open-Font-License-1.1.txt" media-type="text/plain"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="title-xhtml"/>
+    <itemref idref="copyright-xhtml"/>
+    <itemref idref="contents-xhtml"/>
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+  </spine>
+</package>

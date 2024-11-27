@@ -10,7 +10,7 @@ async function testEpub(epubPath: string) {
         contents.forEach((item, index) => {
             console.log(`${index}. ${item.label} (${item.href})`);
         });
-        epub.removeContentRange('3...')
+        await epub.removeContentRange('3...')
         await epub.saveAs( `sampler-${Date.now()}.epub`)
     } catch (error) {
         console.error('Error:', error);
@@ -18,4 +18,4 @@ async function testEpub(epubPath: string) {
 }
 
 // Replace with your EPUB file path
-testEpub('test.epub');
+testEpub('test2.epub');
