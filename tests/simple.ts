@@ -1,4 +1,6 @@
 import RePub from '../src/index';
+import fs from 'fs';
+import path from 'path'
 
 async function testEpub(epubPath: string) {
     try {
@@ -34,7 +36,16 @@ async function testEpub(epubPath: string) {
         // Get core metadata
         const coreMetadata = epub.getCoreMetadata();
         console.log(coreMetadata);
-        
+
+        const cover = await epub.getCover();
+if (cover) {
+  // Save the cover image
+  await fs.promises.writeFile('cover' + path.extname(cover.href), cover.data);
+  console.log(`Cover saved! Media type: ${cover.mediaType}`);
+} else {
+  console.log('No cover found in the EPUB');
+}
+
         await epub.saveAs( `sampler-${Date.now()}.epub`)
     } catch (error) {
         console.error('Error:', error);

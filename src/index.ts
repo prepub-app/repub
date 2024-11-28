@@ -95,6 +95,12 @@ interface CoreMetadata {
     [key: string]: MetadataProperty | MetadataProperty[];
   }
 
+  interface CoverImage {
+    data: Buffer;
+    mediaType: string;
+    href: string;
+  }
+
 class RePub {
 
   private static readonly VERSION = '1.0.0';
@@ -1002,6 +1008,95 @@ private findContentElementByIndex(index: number, elements: ContentElement[] = th
       publisher: getFirstValue(metadata['publisher']) || null,
       date: (getFirstValue(metadata['date']) || getFirstValue(metadata['dcterms:modified'] )|| null )
     };
+  }
+    
+  async getCover(): Promise<CoverImage | null> {
+    if (!this.manifest?.ownerDocument) {
+      throw new Error('EPUB not loaded');
+    }
+
+    const doc = this.manifest.ownerDocument;
+    let coverId: string | null = null;
+    let coverItem: XMLElement | null = null;
+
+    // Method 1: Look for meta element with name="cover"
+    const metadata = doc.getElementsByTagName('metadata')[0];
+    if (metadata) {
+      const metaElements = metadata.getElementsByTagName('meta');
+      for (const meta of Array.from(metaElements)) {
+        if (meta.getAttribute('name') === 'cover') {
+          coverId = meta.getAttribute('content');
+          break;
+        }
+      }
+    }
+
+    // If we found a cover ID, look for the corresponding item
+    if (coverId) {
+      const items = this.manifest.getElementsByTagName('item');
+      for (const item of Array.from(items)) {
+        if (item.getAttribute('id') === coverId) {
+          coverItem = item;
+          break;
+        }
+      }
+    }
+
+    // Method 2: Look for item with properties="cover-image"
+    if (!coverItem) {
+      const items = this.manifest.getElementsByTagName('item');
+      for (const item of Array.from(items)) {
+        if (item.getAttribute('properties') === 'cover-image') {
+          coverItem = item;
+          break;
+        }
+      }
+    }
+
+    // Method 3: Look in guide
+    if (!coverItem) {
+      const guide = doc.getElementsByTagName('guide')[0];
+      if (guide) {
+        const references = guide.getElementsByTagName('reference');
+        for (const ref of Array.from(references)) {
+          if (ref.getAttribute('type') === 'cover') {
+            const href = ref.getAttribute('href');
+            if (href) {
+              // Find corresponding item in manifest
+              const items = this.manifest.getElementsByTagName('item');
+              for (const item of Array.from(items)) {
+                if (item.getAttribute('href') === href) {
+                  coverItem = item;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // If we found a cover item, extract its data
+    if (coverItem) {
+      const href = coverItem.getAttribute('href');
+      const mediaType = coverItem.getAttribute('media-type');
+      
+      if (href && mediaType) {
+        const coverPath = path.join(path.dirname(this.contentPath), href);
+        const coverFile = this.zip.file(coverPath);
+        
+        if (coverFile) {
+          const data = await coverFile.async('nodebuffer');
+          return {
+            data,
+            mediaType,
+            href
+          };
+        }
+      }
+    }
+
+    return null;
   }
     
 }
