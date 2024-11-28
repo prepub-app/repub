@@ -69,6 +69,30 @@ interface ContentOptions {
     id?: string;          // Custom ID for the content
     title?: string;       // Title for navigation
     type?: 'html' | 'md'; // Content type, defaults to 'html'
+    css?: string;  // Add CSS support
+  }
+
+// Add interfaces for metadata
+interface CoreMetadata {
+    title: string;
+    subtitle?: string;
+    authors: string[];
+    language: string;
+    identifier: string;
+    publisher: string | null;
+    date: string | null;
+  }
+  
+  interface MetadataProperty {
+    value: string;
+    id?: string;
+    refinements?: {
+      [key: string]: string;
+    };
+  }
+  
+  interface FullMetadata {
+    [key: string]: MetadataProperty | MetadataProperty[];
   }
 
 class RePub {
@@ -738,17 +762,18 @@ private findContentElementByIndex(index: number, elements: ContentElement[] = th
     return `${prefix}-${timestamp}-${random}`;
   }
 
-  private createXhtmlWrapper(content: string, title?: string): string {
+  private createXhtmlWrapper(content: string, title?: string, css?: string): string {
     return `<?xml version="1.0" encoding="utf-8"?>
-        <!DOCTYPE html>
-        <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
-        <head>
-            <title>${title || 'New Content'}</title>
-        </head>
-        <body>
-            ${content}
-        </body>
-        </html>`;
+            <!DOCTYPE html>
+            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+            <head>
+                <title>${title || 'New Content'}</title>
+                ${css ? `<style type="text/css">${css}</style>` : ''}
+            </head>
+            <body>
+                ${content}
+            </body>
+            </html>`;
   }
 
   private async insertContentAtIndex(content: string, index: number, options: ContentOptions = {}): Promise<void> {
@@ -767,7 +792,7 @@ private findContentElementByIndex(index: number, elements: ContentElement[] = th
     const filePath = path.join(path.dirname(this.contentPath), fileName);
     
     // Create full XHTML document
-    const xhtmlContent = this.createXhtmlWrapper(htmlContent, options.title);
+    const xhtmlContent = this.createXhtmlWrapper(htmlContent, options.title, options.css);
 
     // Add to ZIP
     this.zip.file(filePath, xhtmlContent);
@@ -862,6 +887,121 @@ private findContentElementByIndex(index: number, elements: ContentElement[] = th
 
   async prependContent(content: string, options: ContentOptions = {}): Promise<void> {
     await this.insertContentAtIndex(content, 0, options);
+  }
+    
+  getMetadata(): FullMetadata {
+    if (!this.manifest?.ownerDocument) {
+      throw new Error('EPUB not loaded');
+    }
+
+    const metadata: FullMetadata = {};
+    const metadataElement = this.manifest.ownerDocument.getElementsByTagName('metadata')[0];
+    if (!metadataElement) return metadata;
+
+    // Process all metadata elements
+    const processElement = (element: XMLElement) => {
+      const property: MetadataProperty = {
+        value: element.textContent || ''
+      };
+
+      // Get element ID if exists
+      const id = element.getAttribute('id');
+      if (id) property.id = id;
+
+      // Find refinements
+      if (id) {
+        const refinements = Array.from(metadataElement.getElementsByTagName('meta'))
+          .filter(meta => meta.getAttribute('refines') === `#${id}`);
+
+        if (refinements.length > 0) {
+          property.refinements = {};
+          refinements.forEach(refinement => {
+            const prop = refinement.getAttribute('property');
+            if (prop) {
+              property.refinements![prop] = refinement.textContent || '';
+            }
+          });
+        }
+      }
+
+      return property;
+    };
+
+    // Process DC elements
+    const dcElements = Array.from(metadataElement.getElementsByTagName('*'))
+      .filter(el => el.nodeName.startsWith('dc:'));
+
+    dcElements.forEach(element => {
+      const name = element.nodeName.replace('dc:', '');
+      const property = processElement(element);
+
+      if (metadata[name]) {
+        if (Array.isArray(metadata[name])) {
+          (metadata[name] as MetadataProperty[]).push(property);
+        } else {
+          metadata[name] = [metadata[name] as MetadataProperty, property];
+        }
+      } else {
+        metadata[name] = property;
+      }
+    });
+
+    // Process meta elements
+    const metaElements = Array.from(metadataElement.getElementsByTagName('meta'))
+      .filter(meta => !meta.getAttribute('refines'));
+
+    metaElements.forEach(element => {
+      const property = element.getAttribute('property');
+      if (property) {
+        metadata[property] = processElement(element);
+      }
+    });
+
+    return metadata;
+  }
+
+  getCoreMetadata(): CoreMetadata {
+    const metadata = this.getMetadata();
+    const getFirstValue = (prop: MetadataProperty | MetadataProperty[] | undefined): string => {
+      if (!prop) return '';
+      return Array.isArray(prop) ? prop[0].value : prop.value;
+    };
+
+    const title = getFirstValue(metadata['title']);
+    let subtitle: string | undefined;
+
+    // Check for subtitle in refinements or separate element
+    if (Array.isArray(metadata['title'])) {
+      const subtitleEntry = (metadata['title'] as MetadataProperty[])
+        .find(t => t.refinements?.['title-type'] === 'subtitle');
+      if (subtitleEntry) {
+        subtitle = subtitleEntry.value;
+      }
+    }
+
+    // Get authors (only those with role 'aut' if specified)
+    const authors: string[] = [];
+    if (metadata['creator']) {
+      const creators = Array.isArray(metadata['creator']) 
+        ? metadata['creator'] 
+        : [metadata['creator']];
+
+      creators.forEach(creator => {
+        if (!creator.refinements?.role || creator.refinements.role === 'aut') {
+          authors.push(creator.value);
+        }
+      });
+    }
+
+    return {
+      title,
+      ...(subtitle && { subtitle }),
+      authors,
+      language: getFirstValue(metadata['language']),
+      identifier: getFirstValue(metadata['identifier']),
+      publisher: getFirstValue(metadata['publisher']) || null,
+      date: (getFirstValue(metadata['date']) || getFirstValue(metadata['dcterms:modified'] )|| null )
+    };
   }
     
 }

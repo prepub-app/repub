@@ -15,13 +15,26 @@ async function testEpub(epubPath: string) {
         // Append content
         await epub.appendContent('# Made with prePub\n\nGet your own preview at\n\n[prePub App](https://prepub.app)', {
             title: 'Made with prePub',
-            type: 'md'
+            type: 'md',
+            css: `
+                body { font-family: sans-serif; text-align:center }
+                h1 { color: red; }
+                `
         });
         console.log('Updated EPUB Contents:');
         contents = epub.listContents();
         contents.forEach((item, index) => {
             console.log(`${index}. ${item.label} (${item.href})`);
         });
+
+        // Get all metadata
+        const fullMetadata = epub.getMetadata();
+        console.log(fullMetadata);
+
+        // Get core metadata
+        const coreMetadata = epub.getCoreMetadata();
+        console.log(coreMetadata);
+        
         await epub.saveAs( `sampler-${Date.now()}.epub`)
     } catch (error) {
         console.error('Error:', error);
