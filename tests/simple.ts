@@ -10,7 +10,8 @@ async function testEpub(epubPath: string) {
         contents.forEach((item, index) => {
             console.log(`${index}. ${item.label} (${item.href})`);
         });
-        await epub.removeContentRange('3...')
+        //await epub.removeContentRange('3...')
+        await epub.removeExcept([0, 1, 5, 10]); 
         // Append content
         await epub.appendContent('# Made with prePub\n\nGet your own preview at\n\n[prePub App](https://prepub.app)', {
             title: 'Made with prePub',

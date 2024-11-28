@@ -512,6 +512,68 @@ async removeContentRange(range: string): Promise<void> {
     }
   }
     
+private findContentElementByIndex(index: number, elements: ContentElement[] = this.contents): ContentElement | null {
+    for (const element of elements) {
+      if (element.index === index) {
+        return element;
+      }
+      if (element.children) {
+        const found = this.findContentElementByIndex(index, element.children);
+        if (found) {
+          return found;
+        }
+      }
+    }
+    return null;
+  }
+    
+    /**
+   * Removes all content elements except the specified ones
+   * @param keep Array of indices or IDs of elements to keep
+   */
+  async removeExcept(keep: (string | number)[]): Promise<void> {
+    // Convert all number indices to their corresponding IDs
+    const idsToKeep = new Set(
+      keep.map(identifier => {
+        if (typeof identifier === 'number') {
+          const element = this.findContentElementByIndex(identifier);
+          if (!element) {
+            throw new Error(`Element with index ${identifier} not found`);
+          }
+          return element.id;
+        }
+        return identifier;
+      })
+    );
+
+    // Get all content IDs
+    const allIds = new Set(
+      this.contents.map(element => element.id)
+    );
+
+    // Get IDs to remove
+    const idsToRemove = Array.from(allIds).filter(id => !idsToKeep.has(id));
+
+    // Remove elements in reverse order to maintain correct indices
+    for (let i = idsToRemove.length - 1; i >= 0; i--) {
+      await this.removeContentElement(idsToRemove[i]);
+    }
+  }
+
+  /**
+   * Removes all content elements except those that match the filter function
+   * @param filterFn Function that returns true for elements to keep
+   */
+  async removeExceptWhere(filterFn: (element: ContentElement) => boolean): Promise<void> {
+    // Find all elements that don't match the filter
+    const elementsToRemove = this.contents.filter(element => !filterFn(element));
+
+    // Remove elements in reverse order to maintain correct indices
+    for (let i = elementsToRemove.length - 1; i >= 0; i--) {
+      await this.removeContentElement(elementsToRemove[i].id);
+    }
+  }
+    
   private normalizeWhitespace(element: XMLElement): void {
     // Convert childNodes to array for safe iteration
     const children = Array.from(element.childNodes);
@@ -678,15 +740,15 @@ async removeContentRange(range: string): Promise<void> {
 
   private createXhtmlWrapper(content: string, title?: string): string {
     return `<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
-  <head>
-    <title>${title || 'New Content'}</title>
-  </head>
-  <body>
-    ${content}
-  </body>
-</html>`;
+        <!DOCTYPE html>
+        <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+        <head>
+            <title>${title || 'New Content'}</title>
+        </head>
+        <body>
+            ${content}
+        </body>
+        </html>`;
   }
 
   private async insertContentAtIndex(content: string, index: number, options: ContentOptions = {}): Promise<void> {
@@ -752,34 +814,38 @@ async removeContentRange(range: string): Promise<void> {
 
     // Update NCX if it exists
     if (this.ncx) {
-      const ncxDoc = this.ncx as XMLDocument;
-      const navMap = ncxDoc.getElementsByTagName('navMap')[0];
-      if (navMap) {
-        const navPoint = ncxDoc.createElement('navPoint');
-        const navLabel = ncxDoc.createElement('navLabel');
-        const text = ncxDoc.createElement('text');
-        const contentElement = ncxDoc.createElement('content');
-
-        text.textContent = options.title || `Content ${id}`;
-        contentElement.setAttribute('src', fileName);
-
-        navLabel.appendChild(text);
-        navPoint.appendChild(navLabel);
-        navPoint.appendChild(contentElement);
-
-        // Add playOrder if it exists in other navPoints
-        const existingNavPoints = navMap.getElementsByTagName('navPoint');
-        if (existingNavPoints[0]?.getAttribute('playOrder')) {
-          navPoint.setAttribute('playOrder', (index + 1).toString());
-        }
-
-        if (index >= existingNavPoints.length) {
-          navMap.appendChild(navPoint);
-        } else {
-          navMap.insertBefore(navPoint, existingNavPoints[index]);
+        const ncxDoc = this.ncx as XMLDocument;
+        const navMap = ncxDoc.getElementsByTagName('navMap')[0];
+        if (navMap) {
+          const navPoint = ncxDoc.createElement('navPoint');
+          const navLabel = ncxDoc.createElement('navLabel');
+          const text = ncxDoc.createElement('text');
+          const contentElement = ncxDoc.createElement('content');
+  
+          // Add required id attribute to navPoint
+          navPoint.setAttribute('id', id);
+          navPoint.setAttribute('class', 'chapter'); // Optional but common in NCX
+  
+          text.textContent = options.title || `Content ${id}`;
+          contentElement.setAttribute('src', fileName);
+  
+          navLabel.appendChild(text);
+          navPoint.appendChild(navLabel);
+          navPoint.appendChild(contentElement);
+  
+          // Add playOrder if it exists in other navPoints
+          const existingNavPoints = navMap.getElementsByTagName('navPoint');
+          if (existingNavPoints[0]?.getAttribute('playOrder')) {
+            navPoint.setAttribute('playOrder', (index + 1).toString());
+          }
+  
+          if (index >= existingNavPoints.length) {
+            navMap.appendChild(navPoint);
+          } else {
+            navMap.insertBefore(navPoint, existingNavPoints[index]);
+          }
         }
       }
-    }
 
     // Rebuild contents list
     await this.buildContentsList();
