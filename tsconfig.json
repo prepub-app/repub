@@ -1,7 +1,8 @@
 {
     "compilerOptions": {
-      "target": "es2018",
-      "module": "commonjs",
+      "target": "es2020",
+      "module": "esnext",
+      "moduleResolution": "bundler",
       "declaration": true,
       "outDir": "./dist",
       "strict": true,
@@ -9,6 +10,6 @@
       "skipLibCheck": true,
       "forceConsistentCasingInFileNames": true
     },
-    "include": ["src"],
+    "include": ["src", "tsup.config.ts"],
     "exclude": ["node_modules", "dist", "test"]
   }

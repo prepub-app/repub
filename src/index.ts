@@ -1,6 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-import axios from 'axios';
 import JSZip from 'jszip';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import format from 'xml-formatter';
@@ -101,11 +98,13 @@ interface CoreMetadata {
     href: string;
   }
 
+  type FileData =  ArrayBuffer | Uint8Array | Blob;
+
 class RePub {
 
   private static readonly VERSION = '1.0.0';
-    private zip!: JSZip;
-    private md: MarkdownIt;
+private zip!: JSZip;
+private md: MarkdownIt;
   private contentPath: string = '';
   private spine: XMLElement | null = null;
   private manifest: XMLElement | null = null;
@@ -118,19 +117,41 @@ class RePub {
             html: true,
             xhtmlOut: true  // Important for EPUB compatibility
           });
+    }
+    
+    /**
+   * Load EPUB data from a file or buffer
+   * @param data The EPUB data as Buffer, ArrayBuffer, Uint8Array, or Blob
+   */
+  async load(data: FileData): Promise<void> {
+    this.zip = await JSZip.loadAsync(data);
+    await this.initialize();
   }
-
+    
+      /**
+   * Open EPUB from a file path or URL
+   * @param location File path or URL
+   */
   async open(location: string): Promise<void> {
-    let epubData: Buffer;
+    let epubData: FileData;
 
     if (location.startsWith('http')) {
-      const response = await axios.get(location, { responseType: 'arraybuffer' });
-      epubData = Buffer.from(response.data);
+      const response = await fetch(location);
+      epubData = await response.arrayBuffer();
     } else {
-      epubData = await fs.promises.readFile(location);
+      // Only import fs if we're in Node environment
+      if (typeof window === 'undefined') {
+        const fs = await import('fs/promises');
+        epubData = await fs.readFile(location);
+      } else {
+        throw new Error('File path loading is not supported in browser environment');
+      }
     }
 
-    this.zip = await JSZip.loadAsync(epubData);
+    await this.load(epubData);
+  }
+
+  private async initialize(): Promise<void> {
     
     // Read container.xml to get content.opf path
     const containerFile = this.zip.file('META-INF/container.xml');
@@ -174,7 +195,7 @@ class RePub {
     if (navItem) {
       const href = navItem.getAttribute('href');
       if (href) {
-        const navPath = path.join(path.dirname(this.contentPath), href);
+        const navPath = this.path.join(this.path.dirname(this.contentPath), href);
         const navFile = this.zip.file(navPath);
         if (navFile) {
           const navContent = await navFile.async('string');
@@ -191,7 +212,7 @@ class RePub {
     if (ncxItem) {
       const href = ncxItem.getAttribute('href');
       if (href) {
-        const ncxPath = path.join(path.dirname(this.contentPath), href);
+        const ncxPath = this.path.join(this.path.dirname(this.contentPath), href);
         const ncxFile = this.zip.file(ncxPath);
         if (ncxFile) {
           const ncxContent = await ncxFile.async('string');
@@ -487,7 +508,7 @@ async removeContentRange(range: string): Promise<void> {
     }
 
     // Remove from zip
-    const contentPath = path.join(path.dirname(this.contentPath), content.href.split('#')[0]);
+    const contentPath = this.path.join(this.path.dirname(this.contentPath), content.href.split('#')[0]);
     this.zip.remove(contentPath);
 
     if (!this.manifest || !this.spine) {
@@ -682,7 +703,7 @@ private findContentElementByIndex(index: number, elements: ContentElement[] = th
     modifiedElement.textContent = currentDateTime;
   }
 
-  async saveAs(location: string): Promise<void> {
+ /* async saveAs(location: string): Promise<void> {
     if (!this.manifest || !this.spine) {
       throw new Error('Invalid EPUB structure');
     }
@@ -762,6 +783,120 @@ private findContentElementByIndex(index: number, elements: ContentElement[] = th
     await fs.promises.writeFile(location, content);
   }
     
+    
+    */
+    
+    /**
+   * Prepare EPUB content for output
+   */
+  private async prepareOutput(): Promise<void> {
+    if (!this.manifest || !this.spine) {
+      throw new Error('Invalid EPUB structure');
+    }
+
+    // Update metadata
+    this.updateMetadata();
+
+    const serializer = new XMLSerializer();
+    const compressionOptions = {
+      compression: 'DEFLATE' as const,
+      compressionOptions: {
+        level: 9
+      }
+    };
+
+    // Helper function to format and save XML content
+    const saveXmlContent = (
+      doc: XMLDocument,
+      path: string,
+      options = compressionOptions
+    ) => {
+      this.normalizeWhitespace(doc.documentElement);
+      const content = format(
+        serializer.serializeToString(doc.documentElement as unknown as Node),
+        { indentation: '  ', collapseContent: true }
+      );
+      this.zip.file(path, content, options);
+    };
+
+    // Update content.opf
+    saveXmlContent(
+      this.manifest.ownerDocument as XMLDocument,
+      this.contentPath
+    );
+
+    // Update navigation document if it exists
+    if (this.navigation) {
+      const navItem = Array.from(this.manifest.getElementsByTagName('item'))
+        .find(item => item.getAttribute('properties')?.includes('nav'));
+      
+      if (navItem) {
+        const href = navItem.getAttribute('href');
+        if (href) {
+          const navPath = this.path.join(
+            this.path.dirname(this.contentPath),
+            href
+          );
+          saveXmlContent(this.navigation as XMLDocument, navPath);
+        }
+      }
+    }
+
+    // Update NCX if it exists
+    if (this.ncx) {
+      const ncxItem = Array.from(this.manifest.getElementsByTagName('item'))
+        .find(item => item.getAttribute('media-type') === 'application/x-dtbncx+xml');
+      
+      if (ncxItem) {
+        const href = ncxItem.getAttribute('href');
+        if (href) {
+          const ncxPath = this.path.join(
+            this.path.dirname(this.contentPath),
+            href
+          );
+          saveXmlContent(this.ncx as XMLDocument, ncxPath);
+        }
+      }
+    }
+  }
+
+  /**
+   * Get the EPUB data in a format suitable for storage or download
+   */
+  async getOutput(type: 'blob' | 'arraybuffer' | 'uint8array' | 'base64' = 'blob'): Promise<any> {
+    await this.prepareOutput();
+    return await this.zip.generateAsync({ type });
+  }
+
+  // Node.js specific method
+  async saveAs(location: string): Promise<void> {
+    if (typeof window !== 'undefined') {
+      throw new Error('saveAs is only supported in Node.js environment');
+    }
+
+    await this.prepareOutput();
+    const content = await this.getOutput('uint8array');
+    const fs = await import('fs/promises');
+    await fs.writeFile(location, content);
+  }
+    
+  /**
+   * Utility function to replicate Node's path
+   */
+    private path = {
+        join(...parts: string[]): string {
+            return parts
+              .map(part => part.replace(/^\/+|\/+$/g, '')) // Remove leading/trailing slashes
+              .filter(part => part.length > 0)  // Remove empty parts
+              .join('/');
+        },
+        dirname(filePath: string): string {
+            const parts = filePath.split('/');
+            parts.pop();
+            return parts.join('/');
+          }
+    }
+    
   private generateUniqueId(prefix: string = 'content'): string {
     const timestamp = new Date().getTime();
     const random = Math.floor(Math.random() * 10000);
@@ -795,7 +930,7 @@ private findContentElementByIndex(index: number, elements: ContentElement[] = th
     // Generate file name and ID
     const id = options.id || this.generateUniqueId();
     const fileName = `${id}.xhtml`;
-    const filePath = path.join(path.dirname(this.contentPath), fileName);
+    const filePath = this.path.join(this.path.dirname(this.contentPath), fileName);
     
     // Create full XHTML document
     const xhtmlContent = this.createXhtmlWrapper(htmlContent, options.title, options.css);
@@ -1082,7 +1217,7 @@ private findContentElementByIndex(index: number, elements: ContentElement[] = th
       const mediaType = coverItem.getAttribute('media-type');
       
       if (href && mediaType) {
-        const coverPath = path.join(path.dirname(this.contentPath), href);
+        const coverPath = this.path.join(this.path.dirname(this.contentPath), href);
         const coverFile = this.zip.file(coverPath);
         
         if (coverFile) {
