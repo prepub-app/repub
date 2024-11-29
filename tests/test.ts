@@ -1,4 +1,4 @@
-import RePub from '../src/index.ts';
+import RePub from '../src/core.ts';
 import fs from 'fs/promises';
 import path from 'path';
 

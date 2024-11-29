@@ -1,12 +1,14 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+    entry: ['src/index.ts', 'src/fileSystem.ts'], // Include both entry points
   format: ['esm', 'cjs'],
   dts: true,
   splitting: false,
-  sourcemap: true,
-  clean: true,
-  minify: true,
-  treeshake: true
+  sourcemap: false,
+    clean: true,
+    external: ['fs/promises'],
+  //minify: true,
+  //treeshake: true
 });
+

@@ -11,11 +11,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
-    },
-    "./fileSystem": {
-      "types": "./dist/fileSystem.d.ts",
-      "import": "./dist/fileSystem.js",
-      "require": "./dist/fileSystem.cjs"
     }
   },
   "files": [
