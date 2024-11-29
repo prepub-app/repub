@@ -7,7 +7,7 @@ The RePub module is a TypeScript library for manipulating EPUB files. It provide
 ## Installation
 
 ```bash
-npm install repub
+npm install @prepub/repub
 ```
 
 ## Core Features
