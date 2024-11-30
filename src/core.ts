@@ -23,7 +23,9 @@ import {
     MetadataProperty,
     FullMetadata,
     CoverImage,
-    FileData
+  FileData,
+  ContentType,
+    LandmarkInfo
 } from './types';
 
 /**
@@ -250,59 +252,231 @@ export class RePub {
     }, index];
   }
 
-  /**
-   * Builds the internal contents list from navigation documents
-   * @private
-   */
-  private async buildContentsList(): Promise<void> {
-    this.contents = [];
-    let index = 0;
-
-    if (this.navigation) {
-      const topLevelList = this.navigation.getElementsByTagName('ol')[0];
+/**
+ * Builds the internal contents list from navigation documents
+ * @private
+ */
+private async buildContentsList(): Promise<void> {
+  this.contents = [];
+  let index = 0;
+  
+  // Helper to determine content type from landmarks
+  const getLandmarkInfo = (href: string): LandmarkInfo => {
+    if (!this.navigation) return {};
+    
+    const landmarks = Array.from(this.navigation.getElementsByTagName('nav'))
+      .find(nav => nav.getAttribute('epub:type') === 'landmarks');
       
-      if (topLevelList) {
-        const topLevelItems = Array.from(topLevelList.childNodes).filter(
-          child => child.nodeType === 1 && child.nodeName.toLowerCase() === 'li'
-        );
+    if (!landmarks) return {};
 
-        for (const item of topLevelItems) {
-          const anchor = item.getElementsByTagName('a')[0];
+    const links = Array.from(landmarks.getElementsByTagName('a'));
+    for (const link of links) {
+      const landmarkHref = link.getAttribute('href');
+      if (!landmarkHref) continue;
+      
+      // Match either exact href or the file part without fragment
+      if (landmarkHref === href || landmarkHref.split('#')[0] === href.split('#')[0]) {
+        const type = link.getAttribute('epub:type');
+        if (!type) continue;
+        
+        // Map epub:type to our simplified type system
+        let contentType: ContentType | undefined;
+        if (type.includes('front')) contentType = 'frontmatter';
+        else if (type.includes('back')) contentType = 'backmatter';
+        else if (type.includes('body')) contentType = 'bodymatter';
+        
+        return {
+          type: contentType,
+          role: type
+        };
+      }
+    }
+    
+    return {};
+  };
+
+  // Helper to get content type from the document itself
+  const getContentType = async (href: string): Promise<LandmarkInfo> => {
+    // First check landmarks
+    const landmarkInfo = getLandmarkInfo(href);
+    if (landmarkInfo.type) return landmarkInfo;
+    
+    // If not in landmarks, check the content file itself
+    try {
+      const contentPath = this.path.join(this.path.dirname(this.contentPath), href.split('#')[0]);
+      const contentFile = this.zip.file(contentPath);
+      if (!contentFile) return {};
+      
+      const content = await contentFile.async('string');
+      const bodyMatch = content.match(/<body[^>]*epub:type="([^"]*)"[^>]*>/);
+      if (!bodyMatch) return {};
+      
+      const type = bodyMatch[1];
+      let contentType: ContentType | undefined;
+      
+      if (type.includes('front')) contentType = 'frontmatter';
+      else if (type.includes('back')) contentType = 'backmatter';
+      else if (type.includes('body')) contentType = 'bodymatter';
+      
+      return {
+        type: contentType,
+        role: type
+      };
+    } catch {
+      return {};
+    }
+  };
+
+  if (this.navigation) {
+    const topLevelList = this.navigation.getElementsByTagName('ol')[0];
+    
+    if (topLevelList) {
+      const topLevelItems = Array.from(topLevelList.childNodes).filter(
+        child => child.nodeType === 1 && child.nodeName.toLowerCase() === 'li'
+      );
+
+      for (const item of topLevelItems) {
+        const anchor = item.getElementsByTagName('a')[0];
+        
+        if (anchor) {
+          const href = anchor.getAttribute('href');
           
-          if (anchor) {
-            const href = anchor.getAttribute('href');
+          if (href) {
+            const [children, newIndex] = await this.processNavigationChildrenWithType(
+              item, 
+              index + 1, 
+              getContentType
+            );
+            const { type, role } = await getContentType(href);
             
-            if (href) {
-              const [children, newIndex] = this.processNavigationChildren(item, index + 1);
-              
-              this.contents.push({
-                id: href.split('#')[0],
-                label: anchor.textContent || `Item ${index}`,
-                href,
-                index: index++,
-                ...(children.length > 0 ? { children } : {})
-              });
-              index = newIndex;
-            }
+            const element: ContentElement = {
+              id: href.split('#')[0],
+              label: anchor.textContent || `Item ${index}`,
+              href,
+              index: index++
+            };
+
+            if (type) element.type = type;
+            if (role) element.role = role;
+            if (children.length > 0) element.children = children;
+
+            this.contents.push(element);
+            index = newIndex;
           }
         }
       }
-    } else if (this.ncx) {
-      const navMap = this.ncx.getElementsByTagName('navMap')[0];
+    }
+  } else if (this.ncx) {
+    const navMap = this.ncx.getElementsByTagName('navMap')[0];
+    
+    if (navMap) {
+      const topLevelPoints = Array.from(navMap.childNodes).filter(
+        child => child.nodeType === 1 && child.nodeName === 'navPoint'
+      );
       
-      if (navMap) {
-        const topLevelPoints = Array.from(navMap.childNodes).filter(
-          child => child.nodeType === 1 && child.nodeName === 'navPoint'
+      for (const navPoint of topLevelPoints) {
+        const [element, newIndex] = await this.processNCXNavPointWithType(
+          navPoint, 
+          index,
+          getContentType
         );
+        this.contents.push(element);
+        index = newIndex;
+      }
+    }
+  }
+}
+
+private async processNavigationChildrenWithType(
+  item: XMLElement,
+  currentIndex: number,
+  getContentType: (href: string) => Promise<LandmarkInfo>
+): Promise<[ContentElement[], number]> {
+  const children: ContentElement[] = [];
+  let index = currentIndex;
+  
+  const nestedList = item.getElementsByTagName('ol')[0];
+  
+  if (nestedList) {
+    const childItems = Array.from(nestedList.childNodes).filter(
+      child => child.nodeType === 1 && child.nodeName.toLowerCase() === 'li'
+    );
+
+    for (const childItem of childItems) {
+      const childAnchor = childItem.getElementsByTagName('a')[0];
+      
+      if (childAnchor) {
+        const href = childAnchor.getAttribute('href');
         
-        for (const navPoint of topLevelPoints) {
-          const [element, newIndex] = this.processNCXNavPoint(navPoint, index);
-          this.contents.push(element);
+        if (href) {
+          const [grandChildren, newIndex] = await this.processNavigationChildrenWithType(
+            childItem, 
+            index + 1,
+            getContentType
+          );
+          const { type, role } = await getContentType(href);
+          
+          const element: ContentElement = {
+            id: href.split('#')[0],
+            label: childAnchor.textContent || `Item ${index}`,
+            href,
+            index: index++
+          };
+
+          if (type) element.type = type;
+          if (role) element.role = role;
+          if (grandChildren.length > 0) element.children = grandChildren;
+
+          children.push(element);
           index = newIndex;
         }
       }
     }
   }
+  
+  return [children, index];
+}
+
+private async processNCXNavPointWithType(
+  navPoint: XMLElement,
+  currentIndex: number,
+  getContentType: (href: string) => Promise<LandmarkInfo>
+): Promise<[ContentElement, number]> {
+  const textElement = navPoint.getElementsByTagName('text')[0];
+  const contentElement = navPoint.getElementsByTagName('content')[0];
+  const src = contentElement?.getAttribute('src');
+  let index = currentIndex;
+  
+  const children: ContentElement[] = [];
+  const childNavPoints = Array.from(navPoint.childNodes).filter(
+    child => child.nodeType === 1 && child.nodeName === 'navPoint'
+  );
+  
+  for (const childPoint of childNavPoints) {
+    const [childElement, newIndex] = await this.processNCXNavPointWithType(
+      childPoint, 
+      index + 1,
+      getContentType
+    );
+    children.push(childElement);
+    index = newIndex;
+  }
+
+  const { type = undefined, role = undefined } = src ? await getContentType(src) : {};
+
+  const element: ContentElement = {
+    id: src?.split('#')[0] || '',
+    label: textElement?.textContent || `Item ${index}`,
+    href: src || '',
+    index: index++
+  };
+
+  if (type) element.type = type;
+  if (role) element.role = role;
+  if (children.length > 0) element.children = children;
+
+  return [element, index];
+}
 
   /**
    * Returns the current list of content elements
@@ -365,7 +539,7 @@ export class RePub {
     );
 
     for (let i = elementsToRemove.length - 1; i >= 0; i--) {
-      await this.removeContentElement(elementsToRemove[i].id);
+      await this._removeContentElement(elementsToRemove[i].id);
     }
 
     await this.buildContentsList();
@@ -435,10 +609,11 @@ export class RePub {
 
     /**
      * Removes a single content element from the EPUB
+     * @private
      * @param identifier String ID or numeric index of the element to remove
      * @throws {Error} If the content element is not found or the EPUB structure is invalid
      */
-    async removeContentElement(identifier: string | number): Promise<void> {
+    private async _removeContentElement(identifier: string | number): Promise<void> {
       const content = typeof identifier === 'number'
         ? this.contents[identifier]
         : this.contents.find(c => c.id === identifier);
@@ -494,10 +669,13 @@ export class RePub {
           ncxItem.parentNode.removeChild(ncxItem);
         }
       }
-
-      // Update contents list
-      await this.buildContentsList();
     }
+  
+  async removeContentElement(identifier: string | number): Promise<void> {
+    await this._removeContentElement(identifier)
+    // Update contents list
+    await this.buildContentsList();
+  }
 
     /**
      * Removes multiple content elements
@@ -505,8 +683,10 @@ export class RePub {
      */
     async removeContents(identifiers: (string | number)[]): Promise<void> {
       for (const identifier of identifiers) {
-        await this.removeContentElement(identifier);
+        await this._removeContentElement(identifier);
       }
+      // Update contents list
+      await this.buildContentsList();
     }
 
     /**
@@ -561,8 +741,10 @@ export class RePub {
 
       // Remove elements in reverse order to maintain correct indices
       for (let i = idsToRemove.length - 1; i >= 0; i--) {
-        await this.removeContentElement(idsToRemove[i]);
+        await this._removeContentElement(idsToRemove[i]);
       }
+      // Update contents list
+      await this.buildContentsList();
     }
 
     /**
@@ -575,8 +757,10 @@ export class RePub {
 
       // Remove elements in reverse order to maintain correct indices
       for (let i = elementsToRemove.length - 1; i >= 0; i--) {
-        await this.removeContentElement(elementsToRemove[i].id);
+        await this._removeContentElement(elementsToRemove[i].id);
       }
+      // Update contents list
+      await this.buildContentsList();
     }
 
     /**

@@ -51,12 +51,21 @@ export interface XMLNode {
   }
   
   // Content Types
+  export type ContentType = 'frontmatter' | 'bodymatter' | 'backmatter';
+
   export interface ContentElement {
     id: string;
     label: string;
     href: string;
     index: number;
+    type?: ContentType;
+    role?: string;
     children?: ContentElement[];
+  }
+  
+  export interface LandmarkInfo {
+    type?: ContentType;
+    role?: string;
   }
   
   export interface ContentOptions {
