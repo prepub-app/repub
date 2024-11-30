@@ -14,6 +14,7 @@ export interface XMLNode {
   }
   
   export interface XMLElement extends XMLNode {
+    firstChild: XMLElement;
     ownerDocument: XMLDocument;
     children: HTMLCollection;
     attributes: NamedNodeMap;

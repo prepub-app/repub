@@ -13,6 +13,7 @@ import JSZip from 'jszip';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import format from 'xml-formatter';
 import MarkdownIt from 'markdown-it';
+import  TurndownService from 'turndown';
 import {
     XMLElement,
     XMLDocument,
@@ -446,8 +447,10 @@ export class RePub {
         throw new Error('Content element not found');
       }
 
+      const contentURI = content.href.split('#')[0];
+
       // Remove from zip
-      const contentPath = this.path.join(this.path.dirname(this.contentPath), content.href.split('#')[0]);
+      const contentPath = this.path.join(this.path.dirname(this.contentPath), contentURI);
       this.zip.remove(contentPath);
 
       if (!this.manifest || !this.spine) {
@@ -457,7 +460,7 @@ export class RePub {
       // Remove from manifest
       const manifestItems = Array.from(this.manifest.getElementsByTagName('item'));
       const manifestItem = manifestItems.find(
-        item => item.getAttribute('href') === content.href
+        item => item.getAttribute('href') === contentURI
       );
 
       if (manifestItem?.parentNode) {
@@ -577,6 +580,86 @@ export class RePub {
     }
 
     /**
+     * Retrieves content from specified elements or all elements in the EPUB
+     * @param identifiers Optional array of element IDs or indices to retrieve
+     * @param merge Optional boolean to merge all content into a single string
+     * @returns Promise resolving to either a map of ID => content or merged content string
+     * @throws {Error} If EPUB is not loaded or specified elements are not found
+     */
+    async getContents(
+      identifiers?: (string | number)[],
+      merge: boolean = false
+    ): Promise<Record<string, string> | string> {
+      if (!this.manifest || !this.spine) {
+        throw new Error('EPUB not loaded');
+      }
+    
+      // Initialize Turndown once for all conversions
+      const turndownService = new TurndownService({
+        headingStyle: 'atx',
+        hr: '---',
+        bulletListMarker: '*',
+        codeBlockStyle: 'fenced'
+      });
+    
+      // Convert all numeric indices to IDs
+      const contentIds = identifiers?.map(identifier => {
+        if (typeof identifier === 'number') {
+          const element = this.findContentElementByIndex(identifier);
+          if (!element) {
+            throw new Error(`Element with index ${identifier} not found`);
+          }
+          return element.id;
+        }
+        return identifier;
+      });
+    
+      // If no identifiers provided, get all content IDs
+      const idsToRetrieve = contentIds || this.contents.map(element => element.id);
+    
+      // Create a map to store content
+      const contentMap: Record<string, string> = {};
+    
+      // Helper function to extract and convert body content
+      const extractAndConvert = (html: string): string => {
+        // Extract body content
+        const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        if (!bodyMatch) return '';
+        
+        // Convert body content to Markdown
+        return turndownService.turndown(bodyMatch[1]);
+      };
+    
+      // Process each content file
+      for (const id of idsToRetrieve) {
+        const content = this.contents.find(element => element.id === id);
+        if (!content) {
+          throw new Error(`Content element with ID ${id} not found`);
+        }
+    
+        const contentPath = this.path.join(
+          this.path.dirname(this.contentPath),
+          content.href.split('#')[0]
+        );
+    
+        const contentFile = this.zip.file(contentPath);
+        if (!contentFile) {
+          throw new Error(`Content file not found: ${contentPath}`);
+        }
+    
+        const htmlContent = await contentFile.async('string');
+        contentMap[id] = extractAndConvert(htmlContent);
+      }
+    
+      // Return either merged content or the content map
+      if (merge) {
+        return Object.values(contentMap).join('\n\n---\n\n');
+      }
+    
+      return contentMap;
+    }
+
+    /**
      * Normalizes whitespace in XML elements recursively
      * @private
      * @param element XML element to process
@@ -660,6 +743,27 @@ export class RePub {
       modifiedElement.textContent = currentDateTime;
     }
 
+  
+    /**
+     * Resets playOrder attributes in NCX document to ensure they are continuous
+     * @protected
+     */
+    protected resetNcxPlayOrder(): void {
+      if (!this.ncx) return;
+
+      const navMap = this.ncx.getElementsByTagName('navMap')[0];
+      if (!navMap) return;
+
+      const navPoints = navMap.getElementsByTagName('navPoint');
+      // Only proceed if playOrder is being used
+      if (navPoints[0]?.getAttribute('playOrder')) {
+        Array.from(navPoints).forEach((navPoint, index) => {
+          navPoint.setAttribute('playOrder', (index + 1).toString());
+        });
+      }
+    }
+  
+  
     /**
      * Prepares EPUB content for output by updating all necessary files
      * @protected
@@ -731,6 +835,7 @@ export class RePub {
         if (ncxItem) {
           const href = ncxItem.getAttribute('href');
           if (href) {
+            this.resetNcxPlayOrder(); // Reset playOrder values before saving
             const ncxPath = this.path.join(
               this.path.dirname(this.contentPath),
               href
@@ -810,113 +915,139 @@ export class RePub {
               </html>`;
     }
 
-    /**
-     * Inserts new content at a specific index in the EPUB
-     * @private
-     * @param content HTML or Markdown content to insert
-     * @param index Position where content should be inserted
-     * @param options Configuration options for the new content
-     * @throws {Error} If EPUB is not loaded
-     */
-    private async insertContentAtIndex(content: string, index: number, options: ContentOptions = {}): Promise<void> {
-      if (!this.manifest || !this.spine) {
-        throw new Error('EPUB not loaded');
+  /**
+   * Inserts new content at a specific index in the EPUB
+   * @private
+   * @param content HTML or Markdown content to insert
+   * @param index Position where content should be inserted relative to the contents list
+   * @param options Configuration options for the new content
+   * @throws {Error} If EPUB is not loaded
+   */
+  private async insertContentAtIndex(content: string, index: number, options: ContentOptions = {}): Promise<void> {
+    if (!this.manifest || !this.spine) {
+      throw new Error('EPUB not loaded');
+    }
+
+    const doc = this.manifest.ownerDocument as XMLDocument;
+
+    // Convert markdown if needed
+    const htmlContent = options.type === 'md' ? this.md.render(content) : content;
+
+    // Generate file name and ID
+    const id = options.id || this.generateUniqueId();
+    const fileName = `${id}.xhtml`;
+    const filePath = this.path.join(this.path.dirname(this.contentPath), fileName);
+    
+    // Create full XHTML document
+    const xhtmlContent = this.createXhtmlWrapper(htmlContent, options.title, options.css);
+
+    // Add to ZIP
+    this.zip.file(filePath, xhtmlContent);
+
+    // Add to manifest
+    const manifestItem = doc.createElement('item');
+    manifestItem.setAttribute('id', id);
+    manifestItem.setAttribute('href', fileName);
+    manifestItem.setAttribute('media-type', 'application/xhtml+xml');
+    this.manifest.appendChild(manifestItem);
+
+    // Add to spine
+    const spineItem = doc.createElement('itemref');
+    spineItem.setAttribute('idref', id);
+    
+    // Find the correct position in spine based on the content list item at the given index
+    const spineItems = Array.from(this.spine.getElementsByTagName('itemref'));
+    
+    if (this.contents && index < this.contents.length) {
+      // Get the id from the reference content item
+      const referenceContent = this.contents[index];
+      const referenceHref = referenceContent.id;
+      
+      // Find corresponding manifest item
+      const referenceManifestItem = Array.from(this.manifest.getElementsByTagName('item')).find(
+        item => item.getAttribute('href')?.split('#')[0] === referenceHref
+      );
+      
+      if (referenceManifestItem) {
+        // Get the manifest item's ID
+        const referenceId = referenceManifestItem.getAttribute('id');
+        
+        // Find the spine item with matching idref
+        const referenceSpineIndex = spineItems.findIndex(
+          item => item.getAttribute('idref') === referenceId
+        );
+        
+        if (referenceSpineIndex !== -1) {
+          this.spine.insertBefore(spineItem, spineItems[referenceSpineIndex]);
+        } else {
+          // Fallback: append to spine if reference not found
+          this.spine.appendChild(spineItem);
+        }
+      } else {
+        this.spine.appendChild(spineItem);
       }
+    } else {
+      this.spine.appendChild(spineItem);
+    }
 
-      const doc = this.manifest.ownerDocument as XMLDocument;
+    // Add to navigation
+    if (this.navigation) {
+      const navDoc = this.navigation as XMLDocument;
+      const navList = navDoc.getElementsByTagName('ol')[0];
+      if (navList) {
+        const li = navDoc.createElement('li');
+        const a = navDoc.createElement('a');
+        a.setAttribute('href', fileName);
+        a.textContent = options.title || `Content ${id}`;
+        li.appendChild(a);
 
-      // Convert markdown if needed
-      const htmlContent = options.type === 'md' ? this.md.render(content) : content;
+        const navItems = navList.getElementsByTagName('li');
+        if (index >= navItems.length) {
+          navList.appendChild(li);
+        } else {
+          navList.insertBefore(li, navItems[index]);
+        }
+      }
+    }
 
-     // Generate file name and ID
-     const id = options.id || this.generateUniqueId();
-     const fileName = `${id}.xhtml`;
-     const filePath = this.path.join(this.path.dirname(this.contentPath), fileName);
-     
-     // Create full XHTML document
-     const xhtmlContent = this.createXhtmlWrapper(htmlContent, options.title, options.css);
+    // Update NCX if it exists
+    if (this.ncx) {
+      const ncxDoc = this.ncx as XMLDocument;
+      const navMap = ncxDoc.getElementsByTagName('navMap')[0];
+      if (navMap) {
+        const navPoint = ncxDoc.createElement('navPoint');
+        const navLabel = ncxDoc.createElement('navLabel');
+        const text = ncxDoc.createElement('text');
+        const contentElement = ncxDoc.createElement('content');
 
-     // Add to ZIP
-     this.zip.file(filePath, xhtmlContent);
+        // Add required id attribute to navPoint
+        navPoint.setAttribute('id', id);
+        navPoint.setAttribute('class', 'chapter'); // Optional but common in NCX
 
-     // Add to manifest
-     const manifestItem = doc.createElement('item');
-     manifestItem.setAttribute('id', id);
-     manifestItem.setAttribute('href', fileName);
-     manifestItem.setAttribute('media-type', 'application/xhtml+xml');
-     this.manifest.appendChild(manifestItem);
+        text.textContent = options.title || `Content ${id}`;
+        contentElement.setAttribute('src', fileName);
 
-     // Add to spine
-     const spineItem = doc.createElement('itemref');
-     spineItem.setAttribute('idref', id);
-     
-     // Insert at specific position in spine
-     const spineItems = this.spine.getElementsByTagName('itemref');
-     if (index >= spineItems.length) {
-       this.spine.appendChild(spineItem);
-     } else {
-       const referenceItem = spineItems[index];
-       this.spine.insertBefore(spineItem, referenceItem);
-     }
+        navLabel.appendChild(text);
+        navPoint.appendChild(navLabel);
+        navPoint.appendChild(contentElement);
 
-     // Add to navigation
-     if (this.navigation) {
-       const navDoc = this.navigation as XMLDocument;
-       const navList = navDoc.getElementsByTagName('ol')[0];
-       if (navList) {
-         const li = navDoc.createElement('li');
-         const a = navDoc.createElement('a');
-         a.setAttribute('href', fileName);
-         a.textContent = options.title || `Content ${id}`;
-         li.appendChild(a);
+        // Add playOrder if it exists in other navPoints
+        const existingNavPoints = navMap.getElementsByTagName('navPoint');
+        if (existingNavPoints[0]?.getAttribute('playOrder')) {
+          navPoint.setAttribute('playOrder', (index + 1).toString());
+        }
+        
+        if (index >= existingNavPoints.length) {
+          navMap.appendChild(navPoint);
+        } else {
+          navMap.insertBefore(navPoint, existingNavPoints[index]);
+        }
+      }
+    }
 
-         const navItems = navList.getElementsByTagName('li');
-         if (index >= navItems.length) {
-           navList.appendChild(li);
-         } else {
-           navList.insertBefore(li, navItems[index]);
-         }
-       }
-     }
-
-     // Update NCX if it exists
-     if (this.ncx) {
-       const ncxDoc = this.ncx as XMLDocument;
-       const navMap = ncxDoc.getElementsByTagName('navMap')[0];
-       if (navMap) {
-         const navPoint = ncxDoc.createElement('navPoint');
-         const navLabel = ncxDoc.createElement('navLabel');
-         const text = ncxDoc.createElement('text');
-         const contentElement = ncxDoc.createElement('content');
- 
-         // Add required id attribute to navPoint
-         navPoint.setAttribute('id', id);
-         navPoint.setAttribute('class', 'chapter'); // Optional but common in NCX
- 
-         text.textContent = options.title || `Content ${id}`;
-         contentElement.setAttribute('src', fileName);
- 
-         navLabel.appendChild(text);
-         navPoint.appendChild(navLabel);
-         navPoint.appendChild(contentElement);
- 
-         // Add playOrder if it exists in other navPoints
-         const existingNavPoints = navMap.getElementsByTagName('navPoint');
-         if (existingNavPoints[0]?.getAttribute('playOrder')) {
-           navPoint.setAttribute('playOrder', (index + 1).toString());
-         }
- 
-         if (index >= existingNavPoints.length) {
-           navMap.appendChild(navPoint);
-         } else {
-           navMap.insertBefore(navPoint, existingNavPoints[index]);
-         }
-       }
-     }
-
-     // Rebuild contents list
-     await this.buildContentsList();
-   }
+    // Rebuild contents list
+    await this.buildContentsList();
+  }
 
    /**
     * Inserts new content at a specific position in the EPUB
