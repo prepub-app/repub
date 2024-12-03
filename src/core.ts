@@ -23,10 +23,25 @@ import {
     MetadataProperty,
     FullMetadata,
     CoverImage,
-  FileData,
-  ContentType,
+    FileData,
+    ContentType,
     LandmarkInfo
 } from './types';
+
+import debug from 'debug';
+import { Debugger } from 'debug';
+
+const log: Debugger = debug('repub:core');
+
+/**
+ * Error thrown when DRM is detected in an EPUB file
+ */
+export class DRMError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DRMError';
+  }
+}
 
 /**
  * Main class for EPUB manipulation
@@ -72,12 +87,115 @@ export class RePub {
   }
 
   /**
+   * Checks if the EPUB file contains DRM protection
+   * @private
+   * @param zip JSZip instance containing the EPUB contents
+   * @returns True if DRM is detected, false otherwise
+   */
+  private async checkForDRM(zip: JSZip): Promise<boolean> {
+    // Check for encryption files in META-INF
+    const encryptionFile = zip.file('META-INF/encryption.xml');
+    const rightsFile = zip.file('META-INF/rights.xml');
+    
+    if (encryptionFile) {
+      const encryptionContent = await encryptionFile.async('string');
+      const parser = new DOMParser();
+      const encryptionDoc = parser.parseFromString(encryptionContent, 'text/xml');
+      
+      // Check for encryption method elements
+      const encryptionMethod = encryptionDoc.getElementsByTagName('EncryptionMethod');
+      if (encryptionMethod.length > 0) {
+        return true;
+      }
+    }
+
+    // Check for rights file
+    if (rightsFile) {
+      return true;
+    }
+
+    // Check for Adobe's adept DRM
+    const adeptFile = zip.file('META-INF/adept.xml');
+    if (adeptFile) {
+      return true;
+    }
+
+    // Check for Apple's fairplay DRM
+    const fairplayFile = zip.file('META-INF/fairplay.xml');
+    if (fairplayFile) {
+      return true;
+    }
+
+    // Check content.opf for DRM-related metadata
+    const containerFile = zip.file('META-INF/container.xml');
+    if (containerFile) {
+      const containerContent = await containerFile.async('string');
+      const parser = new DOMParser();
+      const containerDoc = parser.parseFromString(containerContent, 'text/xml');
+      const rootfiles = containerDoc.getElementsByTagName('rootfile');
+      
+      if (rootfiles.length > 0) {
+        const fullPath = rootfiles[0].getAttribute('full-path');
+        if (fullPath) {
+          const contentFile = zip.file(fullPath);
+          if (contentFile) {
+            const contentOpf = await contentFile.async('string');
+            const contentDoc = parser.parseFromString(contentOpf, 'text/xml');
+            
+            // Check for DRM-related metadata
+            const metadataElement = contentDoc.getElementsByTagName('metadata')[0];
+            if (metadataElement) {
+              // Check for rights-related metadata
+              const rights = metadataElement.getElementsByTagName('dc:rights');
+              const rightsMeta = Array.from(metadataElement.getElementsByTagName('meta'))
+                .filter(meta => {
+                  const property = meta.getAttribute('property');
+                  return property && (
+                    property.includes('rights') ||
+                    property.includes('encrypted') ||
+                    property.includes('protection')
+                  );
+                });
+
+              if (rights.length > 0 || rightsMeta.length > 0) {
+                // Further analyze the content to determine if it's actually DRM
+                // or just standard rights information
+                for (const element of [...Array.from(rights), ...rightsMeta]) {
+                  const content = element.textContent?.toLowerCase() || '';
+                  if (
+                    content.includes('drm') ||
+                    content.includes('encrypted') ||
+                    content.includes('protected') ||
+                    content.includes('adept') ||
+                    content.includes('fairplay')
+                  ) {
+                    return true;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * Loads EPUB data from a file or buffer
    * @param data The EPUB data as Buffer, ArrayBuffer, Uint8Array, or Blob
    * @throws {Error} If the EPUB structure is invalid
+   * @throws {DRMError} If DRM protection is detected
    */
   async load(data: FileData): Promise<void> {
     this.zip = await JSZip.loadAsync(data);
+    
+    // Check for DRM before proceeding
+    if (await this.checkForDRM(this.zip)) {
+      throw new DRMError('This EPUB file is protected by DRM and cannot be modified');
+    }
+    
     await this.initialize();
   }
 
@@ -85,6 +203,7 @@ export class RePub {
    * Opens an EPUB from a file path or URL
    * @param location File path or URL to the EPUB
    * @throws {Error} If file path loading is attempted in browser environment
+   * @throws {DRMError} If DRM protection is detected
    */
   async open(location: string): Promise<void> {
     let epubData: FileData;
@@ -174,82 +293,6 @@ export class RePub {
     }
 
     await this.buildContentsList();
-  }
-
-  /**
-   * Processes navigation children elements recursively
-   * @private
-   * @param item Current navigation item
-   * @param currentIndex Current index in the content hierarchy
-   * @returns Tuple of processed children array and new current index
-   */
-  private processNavigationChildren(item: XMLElement, currentIndex: number): [ContentElement[], number] {
-    const children: ContentElement[] = [];
-    let index = currentIndex;
-    
-    const nestedList = item.getElementsByTagName('ol')[0];
-    
-    if (nestedList) {
-      const childItems = Array.from(nestedList.childNodes).filter(
-        child => child.nodeType === 1 && child.nodeName.toLowerCase() === 'li'
-      );
-
-      for (const childItem of childItems) {
-        const childAnchor = childItem.getElementsByTagName('a')[0];
-        
-        if (childAnchor) {
-          const href = childAnchor.getAttribute('href');
-          
-          if (href) {
-            const [grandChildren, newIndex] = this.processNavigationChildren(childItem, index + 1);
-            
-            children.push({
-              id: href.split('#')[0],
-              label: childAnchor.textContent || `Item ${index}`,
-              href,
-              index: index++,
-              ...(grandChildren.length > 0 ? { children: grandChildren } : {})
-            });
-            index = newIndex;
-          }
-        }
-      }
-    }
-    
-    return [children, index];
-  }
-
-  /**
-   * Processes an NCX navPoint element recursively
-   * @private
-   * @param navPoint Current NCX navigation point
-   * @param currentIndex Current index in the content hierarchy
-   * @returns Tuple of processed ContentElement and new current index
-   */
-  private processNCXNavPoint(navPoint: XMLElement, currentIndex: number): [ContentElement, number] {
-    const textElement = navPoint.getElementsByTagName('text')[0];
-    const contentElement = navPoint.getElementsByTagName('content')[0];
-    const src = contentElement?.getAttribute('src');
-    let index = currentIndex;
-    
-    const children: ContentElement[] = [];
-    const childNavPoints = Array.from(navPoint.childNodes).filter(
-      child => child.nodeType === 1 && child.nodeName === 'navPoint'
-    );
-    
-    for (const childPoint of childNavPoints) {
-      const [childElement, newIndex] = this.processNCXNavPoint(childPoint, index + 1);
-      children.push(childElement);
-      index = newIndex;
-    }
-
-    return [{
-      id: src?.split('#')[0] || '',
-      label: textElement?.textContent || `Item ${index}`,
-      href: src || '',
-      index: index++,
-      ...(children.length > 0 ? { children } : {})
-    }, index];
   }
 
 /**
@@ -546,30 +589,6 @@ private async processNCXNavPointWithType(
   }
 
   /**
-   * Removes a navigation item and its children from the navigation document
-   * @private
-   * @param element Navigation element to remove
-   */
-  private removeNavigationItem(element: XMLElement): void {
-    const listItem = element.parentNode;
-    if (!listItem) return;
-
-    const orderedList = listItem.parentNode;
-    if (!orderedList) return;
-
-    orderedList.removeChild(listItem);
-
-    const remainingItems = orderedList.getElementsByTagName('li');
-    if (remainingItems.length === 0 && orderedList.parentNode?.nodeName.toLowerCase() === 'li') {
-      const parentListItem = orderedList.parentNode;
-      const parentOrderedList = parentListItem.parentNode;
-      if (parentOrderedList) {
-        parentOrderedList.removeChild(parentListItem);
-      }
-    }
-  }
-
-  /**
    * Removes references to a content file from navigation documents
    * @private
    * @param href Content file reference to remove
@@ -671,23 +690,180 @@ private async processNCXNavPointWithType(
       }
     }
   
-  async removeContentElement(identifier: string | number): Promise<void> {
-    await this._removeContentElement(identifier)
-    // Update contents list
-    await this.buildContentsList();
+  /**
+ * Maps chapter boundaries by analyzing navigation and spine structure
+ * @returns Map of chapter start IDs to arrays of related content IDs
+ */
+private getChapterBoundaries(): Map<string, string[]> {
+  const boundaries = new Map<string, string[]>();
+  
+  if (!this.spine || !this.ncx) return boundaries;
+
+  // Get all spine items for sequential analysis
+  const spineItems = Array.from(this.spine.getElementsByTagName('itemref'))
+    .map(item => item.getAttribute('idref'))
+    .filter((id): id is string => id !== null);
+
+  // Get chapter start points from NCX
+  const navPoints = Array.from(this.ncx.getElementsByTagName('navPoint'));
+  
+  for (let i = 0; i < navPoints.length; i++) {
+    const contentElement = navPoints[i].getElementsByTagName('content')[0];
+    if (!contentElement) continue;
+
+    const chapterSrc = contentElement.getAttribute('src');
+    if (!chapterSrc) continue;
+
+    // Find corresponding manifest item for this chapter
+    const manifestItem = Array.from(this.manifest!.getElementsByTagName('item'))
+      .find(item => {
+        const href = item.getAttribute('href');
+        return href && (href === chapterSrc || chapterSrc.includes(href));
+      });
+    
+    if (!manifestItem) continue;
+    
+    const chapterId = manifestItem.getAttribute('id');
+    if (!chapterId) continue;
+
+    // Find position in spine
+    const spineIndex = spineItems.indexOf(chapterId);
+    if (spineIndex === -1) continue;
+
+    // Determine chapter boundary
+    let endIndex: number;
+    if (i < navPoints.length - 1) {
+      // Find start of next chapter
+      const nextContent = navPoints[i + 1].getElementsByTagName('content')[0];
+      if (nextContent) {
+        const nextSrc = nextContent.getAttribute('src');
+        if (nextSrc) {
+          const nextItem = Array.from(this.manifest!.getElementsByTagName('item'))
+            .find(item => {
+              const href = item.getAttribute('href');
+              return href && (href === nextSrc || nextSrc.includes(href));
+            });
+          
+          if (nextItem) {
+            const nextId = nextItem.getAttribute('id');
+            if (nextId) {
+              endIndex = spineItems.indexOf(nextId);
+            } else {
+              endIndex = spineItems.length;
+            }
+          } else {
+            endIndex = spineItems.length;
+          }
+        } else {
+          endIndex = spineItems.length;
+        }
+      } else {
+        endIndex = spineItems.length;
+      }
+    } else {
+      // Last chapter - include everything until the end
+      endIndex = spineItems.length;
+    }
+
+    // Store all spine items between chapter start and next chapter start
+    boundaries.set(
+      chapterId,
+      spineItems.slice(spineIndex, endIndex)
+    );
+  }
+  log("Boundaries",boundaries);
+  return boundaries;
+}
+
+/**
+ * Removes a content element and all its related split parts
+ * @private
+ * @param identifier String ID or numeric index of the element to remove
+ */
+private async _removeContentElementWithSplits(identifier: string | number): Promise<void> {
+  const content = typeof identifier === 'number'
+    ? this.contents[identifier]
+    : this.contents.find(c => c.id === identifier);
+
+  if (!content || !content.href) {
+    throw new Error('Content element not found');
   }
 
-    /**
-     * Removes multiple content elements
-     * @param identifiers Array of element IDs or indices to remove
-     */
-    async removeContents(identifiers: (string | number)[]): Promise<void> {
-      for (const identifier of identifiers) {
-        await this._removeContentElement(identifier);
+  // Get chapter boundaries
+  const boundaries = this.getChapterBoundaries();
+  
+  // Find manifest item for this content
+  const manifestItem = Array.from(this.manifest!.getElementsByTagName('item'))
+    .find(item => {
+      const href = item.getAttribute('href');
+      return href && (href === content.href || content.href.includes(href));
+    });
+
+  if (!manifestItem) return;
+  
+  const contentId = manifestItem.getAttribute('id');
+  if (!contentId) return;
+
+  // Get all related content IDs
+  const relatedIds = boundaries.get(contentId) || [contentId];
+
+  // Remove all related content
+  for (const id of relatedIds) {
+    const item = Array.from(this.manifest!.getElementsByTagName('item'))
+      .find(item => item.getAttribute('id') === id);
+    
+    if (item) {
+      const href = item.getAttribute('href');
+      if (href) {
+        // Remove from zip
+        const contentPath = this.path.join(this.path.dirname(this.contentPath), href);
+        this.zip.remove(contentPath);
       }
-      // Update contents list
-      await this.buildContentsList();
+
+      // Remove from manifest
+      if (item.parentNode) {
+        item.parentNode.removeChild(item);
+      }
+
+      // Remove from spine
+      const spineItem = Array.from(this.spine!.getElementsByTagName('itemref'))
+        .find(spineItem => spineItem.getAttribute('idref') === id);
+      
+      if (spineItem?.parentNode) {
+        spineItem.parentNode.removeChild(spineItem);
+      }
     }
+  }
+
+  // Remove from navigation documents
+  this.removeFromNavigation(content.href);
+
+  // Remove from NCX if it exists
+  if (this.ncx) {
+    const ncxPoints = Array.from(this.ncx.getElementsByTagName('navPoint'));
+    const ncxItem = ncxPoints.find(point => {
+      const contents = point.getElementsByTagName('content');
+      return contents[0]?.getAttribute('src') === content.href;
+    });
+    
+    if (ncxItem?.parentNode) {
+      ncxItem.parentNode.removeChild(ncxItem);
+    }
+  }
+}
+
+async removeContentElement(identifier: string | number): Promise<void> {
+  await this._removeContentElementWithSplits(identifier);
+  await this.buildContentsList();
+}
+
+async removeContents(identifiers: (string | number)[]): Promise<void> {
+  for (const identifier of identifiers) {
+    await this._removeContentElementWithSplits(identifier);
+  }
+  await this.buildContentsList();
+}
+  
 
     /**
      * Finds a content element by its index in the EPUB
@@ -741,7 +917,8 @@ private async processNCXNavPointWithType(
 
       // Remove elements in reverse order to maintain correct indices
       for (let i = idsToRemove.length - 1; i >= 0; i--) {
-        await this._removeContentElement(idsToRemove[i]);
+        //await this._removeContentElement(idsToRemove[i]);
+        await this._removeContentElementWithSplits(idsToRemove[i]);
       }
       // Update contents list
       await this.buildContentsList();
@@ -763,85 +940,85 @@ private async processNCXNavPointWithType(
       await this.buildContentsList();
     }
 
-    /**
-     * Retrieves content from specified elements or all elements in the EPUB
-     * @param identifiers Optional array of element IDs or indices to retrieve
-     * @param merge Optional boolean to merge all content into a single string
-     * @returns Promise resolving to either a map of ID => content or merged content string
-     * @throws {Error} If EPUB is not loaded or specified elements are not found
-     */
-    async getContents(
-      identifiers?: (string | number)[],
-      merge: boolean = false
-    ): Promise<Record<string, string> | string> {
-      if (!this.manifest || !this.spine) {
-        throw new Error('EPUB not loaded');
-      }
-    
-      // Initialize Turndown once for all conversions
-      const turndownService = new TurndownService({
-        headingStyle: 'atx',
-        hr: '---',
-        bulletListMarker: '*',
-        codeBlockStyle: 'fenced'
-      });
-    
-      // Convert all numeric indices to IDs
-      const contentIds = identifiers?.map(identifier => {
-        if (typeof identifier === 'number') {
-          const element = this.findContentElementByIndex(identifier);
-          if (!element) {
-            throw new Error(`Element with index ${identifier} not found`);
-          }
-          return element.id;
-        }
-        return identifier;
-      });
-    
-      // If no identifiers provided, get all content IDs
-      const idsToRetrieve = contentIds || this.contents.map(element => element.id);
-    
-      // Create a map to store content
-      const contentMap: Record<string, string> = {};
-    
-      // Helper function to extract and convert body content
-      const extractAndConvert = (html: string): string => {
-        // Extract body content
-        const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-        if (!bodyMatch) return '';
-        
-        // Convert body content to Markdown
-        return turndownService.turndown(bodyMatch[1]);
-      };
-    
-      // Process each content file
-      for (const id of idsToRetrieve) {
-        const content = this.contents.find(element => element.id === id);
-        if (!content) {
-          throw new Error(`Content element with ID ${id} not found`);
-        }
-    
-        const contentPath = this.path.join(
-          this.path.dirname(this.contentPath),
-          content.href.split('#')[0]
-        );
-    
-        const contentFile = this.zip.file(contentPath);
-        if (!contentFile) {
-          throw new Error(`Content file not found: ${contentPath}`);
-        }
-    
-        const htmlContent = await contentFile.async('string');
-        contentMap[id] = extractAndConvert(htmlContent);
-      }
-    
-      // Return either merged content or the content map
-      if (merge) {
-        return Object.values(contentMap).join('\n\n---\n\n');
-      }
-    
-      return contentMap;
+  /**
+   * Retrieves content from specified elements or all elements in the EPUB
+   * @param identifiers Optional array of element IDs or indices to retrieve
+   * @param merge Optional boolean to merge all content into a single string
+   * @returns Promise resolving to either a Map of ID => content or merged content string
+   * @throws {Error} If EPUB is not loaded or specified elements are not found
+   */
+  async getContents(
+    identifiers?: (string | number)[],
+    merge: boolean = false
+  ): Promise<Map<string, string> | string> {
+    if (!this.manifest || !this.spine) {
+      throw new Error('EPUB not loaded');
     }
+
+    // Initialize Turndown once for all conversions
+    const turndownService = new TurndownService({
+      headingStyle: 'atx',
+      hr: '---',
+      bulletListMarker: '*',
+      codeBlockStyle: 'fenced'
+    });
+
+    // Convert all numeric indices to IDs
+    const contentIds = identifiers?.map(identifier => {
+      if (typeof identifier === 'number') {
+        const element = this.findContentElementByIndex(identifier);
+        if (!element) {
+          throw new Error(`Element with index ${identifier} not found`);
+        }
+        return element.id;
+      }
+      return identifier;
+    });
+
+    // If no identifiers provided, get all content IDs
+    const idsToRetrieve = contentIds || this.contents.map(element => element.id);
+
+    // Create a map to store content
+    const contentMap = new Map<string, string>();
+
+    // Helper function to extract and convert body content
+    const extractAndConvert = (html: string): string => {
+      // Extract body content
+      const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (!bodyMatch) return '';
+      
+      // Convert body content to Markdown
+      return turndownService.turndown(bodyMatch[1]);
+    };
+
+    // Process each content file
+    for (const id of idsToRetrieve) {
+      const content = this.contents.find(element => element.id === id);
+      if (!content) {
+        throw new Error(`Content element with ID ${id} not found`);
+      }
+
+      const contentPath = this.path.join(
+        this.path.dirname(this.contentPath),
+        content.href.split('#')[0]
+      );
+
+      const contentFile = this.zip.file(contentPath);
+      if (!contentFile) {
+        throw new Error(`Content file not found: ${contentPath}`);
+      }
+
+      const htmlContent = await contentFile.async('string');
+      contentMap.set(id, extractAndConvert(htmlContent));
+    }
+
+    // Return either merged content or the content map
+    if (merge) {
+      return Array.from(contentMap.values()).join('\n\n---\n\n');
+    }
+
+    return contentMap;
+  }
 
     /**
      * Normalizes whitespace in XML elements recursively
@@ -961,6 +1138,9 @@ private async processNCXNavPointWithType(
       // Update metadata
       this.updateMetadata();
 
+      // Remove ophaned media items
+      await this.removeOrphanedMedia()
+
       const serializer = new XMLSerializer();
       const compressionOptions = {
         compression: 'DEFLATE' as const,
@@ -1028,6 +1208,7 @@ private async processNCXNavPointWithType(
           }
         }
       }
+
     }
 
     /**
@@ -1398,7 +1579,7 @@ private async processNCXNavPointWithType(
     * Extracts cover image data from the EPUB if present
     * @returns Promise resolving to cover image data or null if no cover is found
     */
-   async getCover(): Promise<CoverImage | null> {
+   /*async getCover(): Promise<CoverImage | null> {
      if (!this.manifest?.ownerDocument) {
        throw new Error('EPUB not loaded');
      }
@@ -1485,7 +1666,259 @@ private async processNCXNavPointWithType(
      }
 
      return null;
-   }
+   }*/
+  /**
+ * Gets the manifest item for the cover image
+ * @private
+ * @returns Manifest item for cover image or null if not found
+ */
+private getCoverItem(): XMLElement | null {
+  if (!this.manifest?.ownerDocument) {
+    return null;
+  }
+
+  let coverItem: XMLElement | null = null;
+
+  // Method 1: Look for meta element with name="cover"
+  const metadata = this.manifest.ownerDocument.getElementsByTagName('metadata')[0];
+  if (metadata) {
+    const metaElements = metadata.getElementsByTagName('meta');
+    for (const meta of Array.from(metaElements)) {
+      if (meta.getAttribute('name') === 'cover') {
+        const coverId = meta.getAttribute('content');
+        if (coverId) {
+          const items = this.manifest.getElementsByTagName('item');
+          for (const item of Array.from(items)) {
+            if (item.getAttribute('id') === coverId) {
+              coverItem = item;
+              break;
+            }
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // Method 2: Look for item with properties="cover-image"
+  if (!coverItem) {
+    const items = this.manifest.getElementsByTagName('item');
+    for (const item of Array.from(items)) {
+      if (item.getAttribute('properties') === 'cover-image') {
+        coverItem = item;
+        break;
+      }
+    }
+  }
+
+  // Method 3: Look in guide
+  if (!coverItem) {
+    const guide = this.manifest.ownerDocument.getElementsByTagName('guide')[0];
+    if (guide) {
+      const references = guide.getElementsByTagName('reference');
+      for (const ref of Array.from(references)) {
+        if (ref.getAttribute('type') === 'cover') {
+          const href = ref.getAttribute('href');
+          if (href) {
+            const items = this.manifest.getElementsByTagName('item');
+            for (const item of Array.from(items)) {
+              if (item.getAttribute('href') === href) {
+                coverItem = item;
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return coverItem;
+}
+
+/**
+ * Gets cover image data from the EPUB
+ * @returns Promise resolving to cover image data or null if no cover is found
+ */
+async getCover(): Promise<CoverImage | null> {
+  const coverItem = this.getCoverItem();
+  
+  if (coverItem) {
+    const href = coverItem.getAttribute('href');
+    const mediaType = coverItem.getAttribute('media-type');
+    
+    if (href && mediaType) {
+      const coverPath = this.path.join(this.path.dirname(this.contentPath), href);
+      const coverFile = this.zip.file(coverPath);
+      
+      if (coverFile) {
+        const data = await coverFile.async('nodebuffer');
+        return {
+          data,
+          mediaType,
+          href
+        };
+      }
+    }
+  }
+
+  return null;
+}
+  
+/**
+ * Finds and optionally removes orphaned media items from the EPUB
+ * @param remove Whether to remove the orphaned items (default: false)
+ * @returns Array of orphaned media item IDs
+ */
+async findOrphanedMedia(remove: boolean = false): Promise<string[]> {
+  if (!this.manifest) {
+    throw new Error('EPUB not loaded');
+  }
+
+  // Get cover item to exclude from orphan check
+  const coverItem = this.getCoverItem();
+  const coverId = coverItem?.getAttribute('id');
+
+  // Get all media items from manifest
+  const mediaItems = Array.from(this.manifest.getElementsByTagName('item'))
+    .filter(item => {
+      const mediaType = item.getAttribute('media-type');
+      const id = item.getAttribute('id');
+      return mediaType && 
+             (mediaType.startsWith('image/') ||
+              mediaType.startsWith('audio/') ||
+              mediaType.startsWith('video/')) &&
+             id !== coverId; // Exclude cover image
+    });
+
+  // Create a map of media items for quick lookup
+  const mediaMap = new Map<string, {
+    id: string;
+    href: string;
+    referenced: boolean;
+  }>();
+
+  mediaItems.forEach(item => {
+    const id = item.getAttribute('id');
+    const href = item.getAttribute('href');
+    if (id && href) {
+      mediaMap.set(id, {
+        id,
+        href,
+        referenced: false
+      });
+    }
+  });
+
+  // Helper to normalize paths for comparison
+  const normalizePath = (path: string): string => {
+    return path.replace(/^\.?\/+/, '').replace(/\\/g, '/');
+  };
+
+  // Get all content files from manifest
+  const contentItems = Array.from(this.manifest.getElementsByTagName('item'))
+    .filter(item => {
+      const mediaType = item.getAttribute('media-type');
+      return mediaType === 'application/xhtml+xml' ||
+             mediaType === 'application/x-dtbncx+xml' ||
+             mediaType === 'text/css';
+    });
+
+  // Scan each content file for media references
+  for (const item of contentItems) {
+    const href = item.getAttribute('href');
+    if (!href) continue;
+
+    const contentPath = this.path.join(this.path.dirname(this.contentPath), href);
+    const contentFile = this.zip.file(contentPath);
+    if (!contentFile) continue;
+
+    const content = await contentFile.async('string');
+
+    // Check for media references in various formats
+    mediaMap.forEach((media, id) => {
+      // Normalize paths for comparison
+      const mediaPath = normalizePath(media.href);
+      const relativePath = normalizePath(this.path.join(this.path.dirname(href), mediaPath));
+      const absolutePath = normalizePath(mediaPath);
+
+      // Common reference patterns
+      const patterns = [
+        mediaPath,
+        relativePath,
+        absolutePath,
+        `#${id}`,                    // Fragment identifier
+        `="${id}"`,                  // Direct ID reference
+        `='${id}'`,                  // Single-quoted ID reference
+        `url\\(['"]{0,1}${mediaPath}['"]{0,1}\\)`, // CSS url() function
+        `xlink:href=['"]{1}${mediaPath}['"]{1}`,   // SVG xlink:href
+      ];
+
+      // Check each pattern
+      if (patterns.some(pattern => {
+        const regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        return regex.test(content);
+      })) {
+        media.referenced = true;
+      }
+    });
+  }
+
+  // Collect orphaned items
+  const orphanedItems = Array.from(mediaMap.values())
+    .filter(item => !item.referenced);
+
+  // Remove orphaned items if requested
+  if (remove && orphanedItems.length > 0) {
+    for (const item of orphanedItems) {
+      // Remove from zip
+      /*const mediaPath = this.path.join(this.path.dirname(this.contentPath), item.href);
+      this.zip.remove(mediaPath);
+
+      console.log(item)
+
+      // Find and remove the item from manifest
+      const manifestItem = Array.from(this.manifest.getElementsByTagName('item'))
+        .find(element => element.getAttribute('id') === item.id);
+      
+      console.log(manifestItem)
+
+      if (manifestItem && manifestItem.parentNode) {
+        manifestItem.parentNode.removeChild(manifestItem);
+      }*/
+    }
+    for (const orphan of orphanedItems) {
+      const item = Array.from(this.manifest!.getElementsByTagName('item'))
+        .find(item => item.getAttribute('id') === orphan.id);
+      
+      if (item) {
+        const href = item.getAttribute('href');
+        if (href) {
+          // Remove from zip
+          const contentPath = this.path.join(this.path.dirname(this.contentPath), href);
+          this.zip.remove(contentPath);
+        }
+  
+        // Remove from manifest
+        if (item.parentNode) {
+          item.parentNode.removeChild(item);
+        }
+      }
+    }
+  }
+
+  return orphanedItems.map(item => item.id);
+}
+  
+/**
+ * Removes all orphaned media items from the EPUB
+ * @returns Number of items removed
+ */
+async removeOrphanedMedia(): Promise<number> {
+  const orphanedItems = await this.findOrphanedMedia(true);
+  return orphanedItems.length;
+}
+  
 }
 
 export default RePub;
