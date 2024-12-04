@@ -1141,6 +1141,9 @@ async removeContents(identifiers: (string | number)[]): Promise<void> {
       // Remove ophaned media items
       await this.removeOrphanedMedia()
 
+      // Fix any broken links
+      await this.fixBrokenLinks();
+
       const serializer = new XMLSerializer();
       const compressionOptions = {
         compression: 'DEFLATE' as const,
@@ -1575,99 +1578,8 @@ async removeContents(identifiers: (string | number)[]): Promise<void> {
      };
    }
 
-   /**
-    * Extracts cover image data from the EPUB if present
-    * @returns Promise resolving to cover image data or null if no cover is found
-    */
-   /*async getCover(): Promise<CoverImage | null> {
-     if (!this.manifest?.ownerDocument) {
-       throw new Error('EPUB not loaded');
-     }
 
-     const doc = this.manifest.ownerDocument;
-     let coverId: string | null = null;
-     let coverItem: XMLElement | null = null;
-
-     // Method 1: Look for meta element with name="cover"
-     const metadata = doc.getElementsByTagName('metadata')[0];
-     if (metadata) {
-       const metaElements = metadata.getElementsByTagName('meta');
-       for (const meta of Array.from(metaElements)) {
-         if (meta.getAttribute('name') === 'cover') {
-           coverId = meta.getAttribute('content');
-           break;
-         }
-       }
-     }
-
-     // If we found a cover ID, look for the corresponding item
-     if (coverId) {
-       const items = this.manifest.getElementsByTagName('item');
-       for (const item of Array.from(items)) {
-         if (item.getAttribute('id') === coverId) {
-           coverItem = item;
-           break;
-         }
-       }
-     }
-
-     // Method 2: Look for item with properties="cover-image"
-     if (!coverItem) {
-       const items = this.manifest.getElementsByTagName('item');
-       for (const item of Array.from(items)) {
-         if (item.getAttribute('properties') === 'cover-image') {
-           coverItem = item;
-           break;
-         }
-       }
-     }
-
-     // Method 3: Look in guide
-     if (!coverItem) {
-       const guide = doc.getElementsByTagName('guide')[0];
-       if (guide) {
-         const references = guide.getElementsByTagName('reference');
-         for (const ref of Array.from(references)) {
-           if (ref.getAttribute('type') === 'cover') {
-             const href = ref.getAttribute('href');
-             if (href) {
-               // Find corresponding item in manifest
-               const items = this.manifest.getElementsByTagName('item');
-               for (const item of Array.from(items)) {
-                 if (item.getAttribute('href') === href) {
-                   coverItem = item;
-                   break;
-                 }
-               }
-             }
-           }
-         }
-       }
-     }
-
-     // If we found a cover item, extract its data
-     if (coverItem) {
-       const href = coverItem.getAttribute('href');
-       const mediaType = coverItem.getAttribute('media-type');
-       
-       if (href && mediaType) {
-         const coverPath = this.path.join(this.path.dirname(this.contentPath), href);
-         const coverFile = this.zip.file(coverPath);
-         
-         if (coverFile) {
-           const data = await coverFile.async('nodebuffer');
-           return {
-             data,
-             mediaType,
-             href
-           };
-         }
-       }
-     }
-
-     return null;
-   }*/
-  /**
+/**
  * Gets the manifest item for the cover image
  * @private
  * @returns Manifest item for cover image or null if not found
@@ -1870,23 +1782,6 @@ async findOrphanedMedia(remove: boolean = false): Promise<string[]> {
 
   // Remove orphaned items if requested
   if (remove && orphanedItems.length > 0) {
-    for (const item of orphanedItems) {
-      // Remove from zip
-      /*const mediaPath = this.path.join(this.path.dirname(this.contentPath), item.href);
-      this.zip.remove(mediaPath);
-
-      console.log(item)
-
-      // Find and remove the item from manifest
-      const manifestItem = Array.from(this.manifest.getElementsByTagName('item'))
-        .find(element => element.getAttribute('id') === item.id);
-      
-      console.log(manifestItem)
-
-      if (manifestItem && manifestItem.parentNode) {
-        manifestItem.parentNode.removeChild(manifestItem);
-      }*/
-    }
     for (const orphan of orphanedItems) {
       const item = Array.from(this.manifest!.getElementsByTagName('item'))
         .find(item => item.getAttribute('id') === orphan.id);
@@ -1917,6 +1812,179 @@ async findOrphanedMedia(remove: boolean = false): Promise<string[]> {
 async removeOrphanedMedia(): Promise<number> {
   const orphanedItems = await this.findOrphanedMedia(true);
   return orphanedItems.length;
+}
+  
+  /**
+ * Updates broken links in content files after content removal
+ * @private
+ */
+private async fixBrokenLinks(): Promise<void> {
+  if (!this.manifest) {
+    throw new Error('EPUB not loaded');
+  }
+
+  // Get all valid content hrefs from manifest
+  const validHrefs = new Set<string>(
+    Array.from(this.manifest.getElementsByTagName('item'))
+      .map(item => item.getAttribute('href'))
+      .filter((href): href is string => href !== null)
+      .map(href => this.path.join(this.path.dirname(this.contentPath), href))
+  );
+
+  // Get all content documents that might contain links
+  const contentItems = Array.from(this.manifest.getElementsByTagName('item'))
+    .filter(item => {
+      const mediaType = item.getAttribute('media-type');
+      return mediaType === 'application/xhtml+xml' || 
+             mediaType === 'text/html';
+    });
+
+  const parser = new DOMParser();
+  const serializer = new XMLSerializer();
+
+  for (const item of contentItems) {
+    const href = item.getAttribute('href');
+    if (!href) continue;
+
+    const contentPath = this.path.join(this.path.dirname(this.contentPath), href);
+    const contentFile = this.zip.file(contentPath);
+    if (!contentFile) continue;
+
+    const content = await contentFile.async('string');
+    const doc = parser.parseFromString(content, 'application/xhtml+xml');
+
+    let hasChanges = false;
+
+    // Check all elements with href attributes
+    const elementsWithHrefs = Array.from(doc.getElementsByTagName('*'))
+      .filter(el => el.hasAttribute('href'));
+
+    for (const element of elementsWithHrefs) {
+      const linkHref = element.getAttribute('href');
+      if (!linkHref || linkHref === '#' || linkHref.startsWith('http')) continue;
+
+      // Resolve the link relative to the current document
+      const resolvedHref = this.path.join(
+        this.path.dirname(contentPath),
+        linkHref.split('#')[0]
+      );
+
+      // If the target doesn't exist in manifest, replace with #
+      if (!validHrefs.has(resolvedHref)) {
+        element.setAttribute('href', '#');
+        hasChanges = true;
+      }
+    }
+
+    // If we made changes, save the updated content
+    if (hasChanges) {
+      const updatedContent = serializer.serializeToString(doc);
+      this.zip.file(contentPath, updatedContent);
+    }
+  }
+}
+  
+  /**
+ * Adds or updates an asset file in the EPUB
+ * @param path Path where the asset should be stored in the EPUB
+ * @param data File content as string or binary data
+ * @throws {Error} If EPUB is not loaded or path is invalid
+ */
+async insertAsset(path: string, data: string | FileData): Promise<void> {
+  if (!this.manifest) {
+    throw new Error('EPUB not loaded');
+  }
+
+  // Normalize path to use forward slashes and remove leading slash
+  const normalizedPath = path.replace(/\\/g, '/').replace(/^\/+/, '');
+
+  // Get prefix for ID generation based on file type
+  const prefix = normalizedPath.split('/').pop()?.split('.')[0] || 'item';
+
+  // Generate a unique ID for the manifest
+  const id = this.generateUniqueId(prefix);
+
+  // Determine media type
+  const mediaType = this.getMediaType(normalizedPath);
+
+  // Add or update the file in the zip
+  const fullPath = this.path.join(this.path.dirname(this.contentPath), normalizedPath);
+
+  if (typeof data === 'string') {
+    // String data (e.g., CSS, SVG)
+    this.zip.file(fullPath, data);
+  } else {
+    // Binary data
+    if (data instanceof Blob) {
+      // Convert Blob to ArrayBuffer
+      data = await data.arrayBuffer();
+    }
+    this.zip.file(fullPath, data);
+  }
+
+  // Update manifest
+  const existingItem = Array.from(this.manifest.getElementsByTagName('item'))
+    .find(item => item.getAttribute('href') === normalizedPath);
+
+  if (existingItem) {
+    // Update existing item
+    existingItem.setAttribute('media-type', mediaType);
+  } else {
+    // Add new item to manifest
+    const doc = this.manifest.ownerDocument as XMLDocument;
+    const item = doc.createElement('item');
+    item.setAttribute('id', id);
+    item.setAttribute('href', normalizedPath);
+    item.setAttribute('media-type', mediaType);
+    this.manifest.appendChild(item);
+  }
+}
+  
+  /**
+ * Determines the media type based on file extension
+ * @private
+ * @param path File path
+ * @returns MIME type string
+ */
+private getMediaType(path: string): string {
+  const ext = path.toLowerCase().split('.').pop() || '';
+  const mediaTypes: { [key: string]: string } = {
+    // Images
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'svg': 'image/svg+xml',
+    'webp': 'image/webp',
+    
+    // Stylesheets
+    'css': 'text/css',
+    
+    // Fonts
+    'ttf': 'font/ttf',
+    'otf': 'font/otf',
+    'woff': 'font/woff',
+    'woff2': 'font/woff2',
+    
+    // Audio
+    'mp3': 'audio/mpeg',
+    'aac': 'audio/aac',
+    'wav': 'audio/wav',
+    
+    // Video
+    'mp4': 'video/mp4',
+    'webm': 'video/webm',
+    
+    // Documents
+    'xhtml': 'application/xhtml+xml',
+    'html': 'application/xhtml+xml',
+    'xml': 'application/xml',
+    
+    // Default
+    'bin': 'application/octet-stream'
+  };
+
+  return mediaTypes[ext] || mediaTypes['bin'];
 }
   
 }
