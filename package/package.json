@@ -22,7 +22,8 @@
     "build": "tsup",
     "test": "jest",
     "test:watch": "jest --watch",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "test:pdf": "ts-node tests/pdf-conversion.ts"
   },
   "keywords": [
     "epub",

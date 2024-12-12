@@ -14,6 +14,7 @@ export interface XMLNode {
   }
   
   export interface XMLElement extends XMLNode {
+    [x: string]: any;
     firstChild: XMLElement;
     ownerDocument: XMLDocument;
     children: HTMLCollection;
@@ -106,4 +107,28 @@ export interface XMLNode {
   }
   
   // File Data Type
-  export type FileData = ArrayBuffer | Uint8Array | Blob;
+export type FileData = ArrayBuffer | Uint8Array | Blob;
+  
+/**
+ * Configuration options for PDF generation
+ */
+export interface PDFOptions {
+  pageSize?: 'A4' | 'A5' | 'LETTER';
+  margins?: {
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+  };
+  font?: {
+    regular: string;
+    bold: string;
+    italic: string;
+  };
+  fontSize?: {
+    normal: number;
+    heading1: number;
+    heading2: number;
+    heading3: number;
+  };
+}

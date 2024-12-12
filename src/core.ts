@@ -1941,6 +1941,70 @@ async insertAsset(path: string, data: string | FileData): Promise<void> {
 }
   
   /**
+ * Retrieves an asset file from the EPUB by its href
+ * @param href Path or identifier of the asset to retrieve
+ * @returns Promise resolving to an object containing the asset data and metadata
+ * @throws {Error} If the asset is not found or EPUB is not loaded
+ */
+async getAsset(href: string): Promise<{
+  data: Buffer | ArrayBuffer;
+  mediaType: string;
+  href: string;
+  id?: string;
+}> {
+  if (!this.manifest) {
+    throw new Error('EPUB not loaded');
+  }
+
+  // Normalize href to handle fragment identifiers and relative paths
+  const normalizedHref = href.split('#')[0];
+  const resolvedHref = this.path.join(this.path.dirname(this.contentPath), normalizedHref);
+
+  // Try to find the asset in the manifest
+  const manifestItem = Array.from(this.manifest.getElementsByTagName('item'))
+    .find(item => {
+      const itemHref = item.getAttribute('href');
+      if (!itemHref) return false;
+
+      // Compare both original and resolved paths
+      const itemPath = this.path.join(this.path.dirname(this.contentPath), itemHref);
+      return itemHref === normalizedHref || 
+             itemPath === resolvedHref ||
+             itemHref.endsWith(normalizedHref);
+    });
+
+  if (!manifestItem) {
+    throw new Error(`Asset not found: ${href}`);
+  }
+
+  const assetHref = manifestItem.getAttribute('href');
+  const mediaType = manifestItem.getAttribute('media-type');
+  const id = manifestItem.getAttribute('id');
+
+  if (!assetHref || !mediaType) {
+    throw new Error(`Invalid asset entry in manifest: ${href}`);
+  }
+
+  // Get the asset from the zip
+  const assetPath = this.path.join(this.path.dirname(this.contentPath), assetHref);
+  const assetFile = this.zip.file(assetPath);
+
+  if (!assetFile) {
+    throw new Error(`Asset file not found in EPUB: ${assetPath}`);
+  }
+
+  // Get the asset data
+  const data = await assetFile.async('nodebuffer');
+
+  return {
+    data,
+    mediaType,
+    href: assetHref,
+    ...(id && { id })
+  };
+}
+  
+  /**
  * Determines the media type based on file extension
  * @private
  * @param path File path

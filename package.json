@@ -27,7 +27,8 @@
     "build": "tsup",
     "test": "jest",
     "test:watch": "jest --watch",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+     "test:pdf": "ts-node tests/pdf-conversion.ts"
   },
   "keywords": [
     "epub",
@@ -51,6 +52,7 @@
     "debug": "^4.3.7",
     "jszip": "^3.10.1",
     "markdown-it": "^14.1.0",
+    "pdfkit": "^0.15.1",
     "turndown": "^7.2.0",
     "xml-formatter": "^3.6.3"
   },
@@ -63,6 +65,7 @@
     "@types/jszip": "^3.4.1",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^20.10.0",
+    "@types/pdfkit": "^0.13.7",
     "@types/turndown": "^5.0.5",
     "@types/xml-formatter": "^1.2.0",
     "@types/xmldom": "^0.1.34",
