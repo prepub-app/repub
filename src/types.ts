@@ -131,7 +131,7 @@ export interface PDFOptions {
     heading2: number;
     heading3: number;
   };
-  pagination?: PaginationOptions;
+  pagination?: PaginationConfig;
 }
 
 // Add new interface for pagination options
@@ -153,7 +153,7 @@ export interface PaginationOptions {
   };
 }
 
-interface PaginationTextConfig {
+export interface PaginationTextConfig {
   content: string;
   font: string;
   fontSize: number;
@@ -162,13 +162,13 @@ interface PaginationTextConfig {
   margin: number;
 }
 
-interface PaginationSection {
-  left: PaginationTextConfig;
-  center: PaginationTextConfig;
-  right: PaginationTextConfig;
+export interface PaginationSection {
+  left?: PaginationTextConfig;
+  center?: PaginationTextConfig;
+  right?: PaginationTextConfig;
 }
 
-interface PaginationVariables {
+export interface PaginationVariables {
   title?: string;
   author?: string;
   chapter?: string;

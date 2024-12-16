@@ -120,7 +120,7 @@ describe('EPUBToPDF', () => {
 
   test('should apply custom PDF options', async () => {
     const customPdfConverter = new EPUBToPDF({
-      pageSize: 'LETTER',
+      pageSize: 'A4',
       margins: {
         top: 50,
         bottom: 50,
@@ -135,15 +135,42 @@ describe('EPUBToPDF', () => {
         },
         pagination: {
             header: {
-              showBookTitle: true,
-              showChapterTitle: true,
-              align: 'center'
+              left: {
+                content: "{title}",
+                font: "Helvetica-Bold",
+                fontSize: 10,
+                color: "#333333",
+                alignment: "left",
+                margin: 10
+              },
+              right: {
+                content: "Chapter: {chapter}",
+                font: "Helvetica",
+                fontSize: 10,
+                color: "#333333",
+                alignment: "right",
+                margin: 10
+              }
             },
             footer: {
-              showAuthor: true,
-              showPageNumbers: true,
-              align: 'center'
-            }
+              left: {
+                content: "Page {pageNumber} of {totalPages}",
+                font: "Helvetica",
+                fontSize: 8,
+                color: "#666666",
+                alignment: "left",
+                margin: 10
+              },
+              center: {
+                content: "Generated on {date}",
+                font: "Helvetica-Oblique",
+                fontSize: 8,
+                color: "#999999",
+                alignment: "right",
+                margin: 10
+              }
+            },
+            startPage: 1
           }
     });
 

@@ -1,7 +1,11 @@
 import PDFDocument from 'pdfkit';
 import TurndownService from 'turndown';
-import { ContentElement, CoverImage, PDFOptions } from './types';
+import { ContentElement, CoverImage, PDFOptions,PaginationVariables, PaginationSection, PaginationTextConfig } from './types';
 import { RePub } from './core';
+import debug from 'debug';
+import { Debugger } from 'debug';
+
+const log: Debugger = debug('repub:pdf');
 
 /**
  * Class for converting EPUB content to PDF
@@ -11,7 +15,8 @@ export class EPUBToPDF {
   private options: Required<PDFOptions>;
     private turndownService: TurndownService;
     private currentChapterTitle: string = '';
-  private metadata: any;
+    private metadata: any;
+    private paginationVariables: PaginationVariables = {};
 
   /**
    * Creates a new EPUBToPDF converter instance
@@ -79,6 +84,9 @@ export class EPUBToPDF {
     if (cover) {
       await this.addCover(cover);
     }
+      
+    // Initialize pagination variables
+    this.initializePaginationVariables();
 
     // Add title page
     this.addTitlePage(this.metadata);
@@ -108,92 +116,155 @@ export class EPUBToPDF {
     });
   }
 
-  private addPagination(): void {
+    
+  private initializePaginationVariables(): void {
+    if (!this.options.pagination) return;
+
+    const now = new Date();
+    
+    this.paginationVariables = {
+      title: this.metadata.title || '',
+      author: this.metadata.authors?.join(', ') || '',
+      chapter: '',
+      date: now.toISOString().split('T')[0],
+      ...this.options.pagination.variables
+    };
+  }
+
+  private substituteVariables(text: string, pageNumber: number, totalPages: number): string {
+    const variables: Record<string, string | number> = {
+      ...this.paginationVariables,
+      pageNumber,
+      totalPages,
+      chapter: this.currentChapterTitle
+    };
+
+    return text.replace(/\{(\w+)\}/g, (match, variable: string) => {
+      return variable in variables ? String(variables[variable]) : match;
+    });
+  }
+
+    private addPagination(): void {
+      log(this.options.pagination)
     if (!this.options.pagination) return;
 
     const pages = this.doc.bufferedPageRange();
+    const startPage = this.options.pagination.startPage || 0;
     
     for (let i = pages.start; i < pages.start + pages.count; i++) {
+      // Skip pages before start page
+      if (i < startPage) continue;
+
       this.doc.switchToPage(i);
 
-      // Add header if configured
-      if (this.options.pagination.header) {
-        const oldTopMargin = this.doc.page.margins.top;
-        this.doc.page.margins.top = 0;
-        
-        const headerText = this.buildHeaderFooterText(this.options.pagination.header);
-        if (headerText) {
-          this.doc
-            .font(this.options.font.regular)
-            .fontSize(this.options.fontSize.normal)
-            .text(
-              headerText,
-              0,
-              oldTopMargin / 3,
-              {
-                align: this.options.pagination.header.align || 'center',
-                width: this.doc.page.width
-              }
+        // Add header
+        if (this.options.pagination.header) {
+            this.addPaginationSection(
+                this.options.pagination.header,
+                true,
+                i - startPage + 1,
+                pages.count - startPage
             );
         }
-        
-        this.doc.page.margins.top = oldTopMargin;
-      }
 
-      // Add footer if configured
-      if (this.options.pagination.footer) {
-        const oldBottomMargin = this.doc.page.margins.bottom;
-        this.doc.page.margins.bottom = 0;
-        
-        let footerText = this.buildHeaderFooterText(this.options.pagination.footer);
-        
-        // Add page numbers if enabled
-        if (this.options.pagination.footer.showPageNumbers) {
-          footerText = footerText
-            ? `${footerText} | Page ${i + 1} of ${pages.count}`
-            : `Page ${i + 1} of ${pages.count}`;
-        }
-
-        if (footerText) {
-          this.doc
-            .font(this.options.font.regular)
-            .fontSize(this.options.fontSize.normal)
-            .text(
-              footerText,
-              0,
-              this.doc.page.height - oldBottomMargin / 1.5,
-              {
-                align: this.options.pagination.footer.align || 'center',
-                width: this.doc.page.width
-              }
+        // Add footer
+        if (this.options.pagination.footer) {
+            this.addPaginationSection(
+                this.options.pagination.footer,
+                false,
+                i - startPage + 1,
+                pages.count - startPage
             );
         }
-        
-        this.doc.page.margins.bottom = oldBottomMargin;
-      }
     }
+        
   }
 
-  private buildHeaderFooterText(options: {
-    showAuthor?: boolean;
-    showBookTitle?: boolean;
-    showChapterTitle?: boolean;
-  }): string {
-    const parts: string[] = [];
+  private addPaginationSection(
+    section: PaginationSection,
+    isHeader: boolean,
+    pageNumber: number,
+    totalPages: number
+  ): void {
+    const { left, center, right } = section;
+    const margin = this.doc.page.margins[isHeader ? 'top' : 'bottom'];
+    const yPosition = isHeader
+      ? margin / 2
+      : this.doc.page.height - margin / 2;
 
-    if (options.showBookTitle && this.metadata.title) {
-      parts.push(this.metadata.title);
+    // Temporarily remove margin
+    this.doc.page.margins[isHeader ? 'top' : 'bottom'] = 0;
+
+    // Add left text
+    if (left?.content) {
+      this.addPaginationText(
+        left,
+        yPosition,
+        pageNumber,
+        totalPages,
+        'left'
+      );
     }
 
-    if (options.showAuthor && this.metadata.authors.length > 0) {
-      parts.push(this.metadata.authors[0]);
+    // Add center text
+    if (center?.content) {
+      this.addPaginationText(
+        center,
+        yPosition,
+        pageNumber,
+        totalPages,
+        'center'
+      );
     }
 
-    if (options.showChapterTitle && this.currentChapterTitle) {
-      parts.push(this.currentChapterTitle);
+    // Add right text
+    if (right?.content) {
+      this.addPaginationText(
+        right,
+        yPosition,
+        pageNumber,
+        totalPages,
+        'right'
+      );
     }
 
-    return parts.join(' | ');
+    // Restore margin
+    this.doc.page.margins[isHeader ? 'top' : 'bottom'] = margin;
+  }
+
+  private addPaginationText(
+    config: PaginationTextConfig,
+    y: number,
+    pageNumber: number,
+    totalPages: number,
+    align: 'left' | 'center' | 'right'
+  ): void {
+    const text = this.substituteVariables(config.content, pageNumber, totalPages);
+    
+    // Set up text options
+    this.doc
+      .font(config.font)
+      .fontSize(config.fontSize)
+      .fillColor(config.color);
+
+    // Calculate the width of the text
+    const textWidth = this.doc.widthOfString(text);
+    
+    // Calculate the available width between margins
+    const availableWidth = this.doc.page.width - (this.doc.page.margins.left + this.doc.page.margins.right);
+
+    // Calculate the final x position based on alignment
+    let finalX = this.doc.page.margins.left; // Start at the left margin for left alignment
+    if (align === 'center') {
+      finalX = this.doc.page.margins.left + (availableWidth / 2) - (textWidth / 2);
+    } else if (align === 'right') {
+      finalX = this.doc.page.width - this.doc.page.margins.right - textWidth;
+    }
+
+    // Add the text at the calculated position
+    this.doc.text(text, finalX, y, {
+      lineBreak: false
+    });
   }
 
   /**
