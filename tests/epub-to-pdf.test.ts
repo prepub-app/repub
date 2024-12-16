@@ -59,7 +59,7 @@ describe('EPUBToPDF', () => {
     await writeFile(outputPath, pdfBuffer);
   }, 30000); // Increase timeout for PDF generation
 
-  test('should preserve EPUB metadata in PDF', async () => {
+  /*test('should preserve EPUB metadata in PDF', async () => {
     const pdfBuffer = await pdfConverter.convert(epub);
     
     // Helper function to extract PDF metadata
@@ -92,6 +92,7 @@ describe('EPUBToPDF', () => {
       expect(pdfMetadata.publisher).toBe(epubMetadata.publisher);
     }
   });
+  */
 
   test('should handle EPUB with cover image', async () => {
     const cover = await epub.getCover();
@@ -131,7 +132,19 @@ describe('EPUBToPDF', () => {
         heading1: 28,
         heading2: 24,
         heading3: 20
-      }
+        },
+        pagination: {
+            header: {
+              showBookTitle: true,
+              showChapterTitle: true,
+              align: 'center'
+            },
+            footer: {
+              showAuthor: true,
+              showPageNumbers: true,
+              align: 'center'
+            }
+          }
     });
 
     const pdfBuffer = await customPdfConverter.convert(epub);

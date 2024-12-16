@@ -131,4 +131,56 @@ export interface PDFOptions {
     heading2: number;
     heading3: number;
   };
+  pagination?: PaginationOptions;
+}
+
+// Add new interface for pagination options
+export type alignment = 'left' | 'center' | 'right';
+
+export interface PaginationOptions {
+  header?: {
+    showAuthor?: boolean;
+    showBookTitle?: boolean;
+    showChapterTitle?: boolean;
+    align?: alignment;
+  };
+  footer?: {
+    showAuthor?: boolean;
+    showBookTitle?: boolean;
+    showChapterTitle?: boolean;
+    showPageNumbers?: boolean;
+    align?: alignment;
+  };
+}
+
+interface PaginationTextConfig {
+  content: string;
+  font: string;
+  fontSize: number;
+  color: string;
+  alignment: 'left' | 'center' | 'right';
+  margin: number;
+}
+
+interface PaginationSection {
+  left: PaginationTextConfig;
+  center: PaginationTextConfig;
+  right: PaginationTextConfig;
+}
+
+interface PaginationVariables {
+  title?: string;
+  author?: string;
+  chapter?: string;
+  pageNumber?: number;
+  totalPages?: number;
+  date?: string;
+  [key: string]: string | number | undefined;
+}
+
+export interface PaginationConfig {
+  header?: PaginationSection;
+  footer?: PaginationSection;
+  variables?: PaginationVariables;
+  startPage?: number;
 }

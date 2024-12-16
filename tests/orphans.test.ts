@@ -1,5 +1,4 @@
 import { RePub } from '../src/core';
-import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import JSZip from 'jszip';
 
 describe('RePub Media Handling', () => {

@@ -9,7 +9,9 @@ import { RePub } from './core';
 export class EPUBToPDF {
   private doc: PDFKit.PDFDocument;
   private options: Required<PDFOptions>;
-  private turndownService: TurndownService;
+    private turndownService: TurndownService;
+    private currentChapterTitle: string = '';
+  private metadata: any;
 
   /**
    * Creates a new EPUBToPDF converter instance
@@ -35,14 +37,16 @@ export class EPUBToPDF {
         heading1: options.fontSize?.heading1 || 18,
         heading2: options.fontSize?.heading2 || 16,
         heading3: options.fontSize?.heading3 || 12
-      }
+        },
+        pagination: options.pagination || {}
     };
 
     // Initialize PDF document
     this.doc = new PDFDocument({
       size: this.options.pageSize,
       margins: this.options.margins,
-      autoFirstPage: false
+        autoFirstPage: false,
+        bufferPages: true
     });
 
     // Initialize HTML to Markdown converter
@@ -60,14 +64,15 @@ export class EPUBToPDF {
    * @returns Promise resolving to PDF data as Buffer
    */
   async convert(epub: RePub): Promise<Buffer> {
-    // Get core metadata
-    const metadata = epub.getCoreMetadata();
+    // Store metadata for headers/footers
+    this.metadata = epub.getCoreMetadata();
 
     // Set PDF metadata
-    this.doc.info['Title'] = metadata.title;
-    if (metadata.authors.length > 0) {
-      this.doc.info['Author'] = metadata.authors.join(', ');
+    this.doc.info['Title'] = this.metadata.title;
+    if (this.metadata.authors.length > 0) {
+      this.doc.info['Author'] = this.metadata.authors.join(', ');
     }
+    this.doc.info['Creator'] = `RePub ${RePub.VERSION}`
 
     // Add cover if exists
     const cover = await epub.getCover();
@@ -76,7 +81,7 @@ export class EPUBToPDF {
     }
 
     // Add title page
-    this.addTitlePage(metadata);
+    this.addTitlePage(this.metadata);
 
     // Process content
     const contents = epub.listContents();
@@ -88,6 +93,9 @@ export class EPUBToPDF {
       }
     }
 
+    // Add pagination after all content is added
+    this.addPagination();
+
     // Finalize document
     this.doc.end();
 
@@ -98,6 +106,94 @@ export class EPUBToPDF {
       this.doc.on('end', () => resolve(Buffer.concat(chunks)));
       this.doc.on('error', reject);
     });
+  }
+
+  private addPagination(): void {
+    if (!this.options.pagination) return;
+
+    const pages = this.doc.bufferedPageRange();
+    
+    for (let i = pages.start; i < pages.start + pages.count; i++) {
+      this.doc.switchToPage(i);
+
+      // Add header if configured
+      if (this.options.pagination.header) {
+        const oldTopMargin = this.doc.page.margins.top;
+        this.doc.page.margins.top = 0;
+        
+        const headerText = this.buildHeaderFooterText(this.options.pagination.header);
+        if (headerText) {
+          this.doc
+            .font(this.options.font.regular)
+            .fontSize(this.options.fontSize.normal)
+            .text(
+              headerText,
+              0,
+              oldTopMargin / 3,
+              {
+                align: this.options.pagination.header.align || 'center',
+                width: this.doc.page.width
+              }
+            );
+        }
+        
+        this.doc.page.margins.top = oldTopMargin;
+      }
+
+      // Add footer if configured
+      if (this.options.pagination.footer) {
+        const oldBottomMargin = this.doc.page.margins.bottom;
+        this.doc.page.margins.bottom = 0;
+        
+        let footerText = this.buildHeaderFooterText(this.options.pagination.footer);
+        
+        // Add page numbers if enabled
+        if (this.options.pagination.footer.showPageNumbers) {
+          footerText = footerText
+            ? `${footerText} | Page ${i + 1} of ${pages.count}`
+            : `Page ${i + 1} of ${pages.count}`;
+        }
+
+        if (footerText) {
+          this.doc
+            .font(this.options.font.regular)
+            .fontSize(this.options.fontSize.normal)
+            .text(
+              footerText,
+              0,
+              this.doc.page.height - oldBottomMargin / 1.5,
+              {
+                align: this.options.pagination.footer.align || 'center',
+                width: this.doc.page.width
+              }
+            );
+        }
+        
+        this.doc.page.margins.bottom = oldBottomMargin;
+      }
+    }
+  }
+
+  private buildHeaderFooterText(options: {
+    showAuthor?: boolean;
+    showBookTitle?: boolean;
+    showChapterTitle?: boolean;
+  }): string {
+    const parts: string[] = [];
+
+    if (options.showBookTitle && this.metadata.title) {
+      parts.push(this.metadata.title);
+    }
+
+    if (options.showAuthor && this.metadata.authors.length > 0) {
+      parts.push(this.metadata.authors[0]);
+    }
+
+    if (options.showChapterTitle && this.currentChapterTitle) {
+      parts.push(this.currentChapterTitle);
+    }
+
+    return parts.join(' | ');
   }
 
   /**
@@ -192,16 +288,9 @@ export class EPUBToPDF {
     if (!contentText) return;
 
     this.doc.addPage();
-
-    // Add section title
-   /* this.doc
-      .font(this.options.font.bold)
-      .fontSize(this.options.fontSize.heading2)
-      .text(content.label, {
-        align: 'left',
-        continued: false
-      })
-      .moveDown();*/
+    
+    // Update current chapter title for headers/footers
+    this.currentChapterTitle = content.label;
 
     // Process content
     await this.renderContent(contentText);

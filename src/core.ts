@@ -49,7 +49,7 @@ export class DRMError extends Error {
  */
 export class RePub {
   /** Current version of the RePub library */
-  private static readonly VERSION = '1.0.0';
+  static readonly VERSION = '1.0.0';
   
   /** JSZip instance for handling the EPUB archive */
   private zip!: JSZip;
