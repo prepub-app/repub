@@ -17,6 +17,7 @@ export class EPUBToPDF {
     private currentChapterTitle: string = '';
     private metadata: any;
     private paginationVariables: PaginationVariables = {};
+    private epub: RePub | null = null;
 
   /**
    * Creates a new EPUBToPDF converter instance
@@ -68,7 +69,10 @@ export class EPUBToPDF {
    * @param epub RePub instance containing the EPUB to convert
    * @returns Promise resolving to PDF data as Buffer
    */
-  async convert(epub: RePub): Promise<Buffer> {
+    async convert(epub: RePub): Promise<Buffer> {
+      
+        this.epub = epub;
+
     // Store metadata for headers/footers
     this.metadata = epub.getCoreMetadata();
 
@@ -287,7 +291,7 @@ export class EPUBToPDF {
         valign: 'center'
       });
     } catch (error) {
-      console.error('Failed to add cover image:', error);
+      log('Failed to add cover image:', error);
     }
   }
 
@@ -373,6 +377,30 @@ export class EPUBToPDF {
       }
     }
   }
+    
+  private async processImage(src: string): Promise<Buffer | null> {
+    if (!this.epub) return null;
+
+    try {
+      const asset = await this.epub.getAsset(src);
+      
+      // Check if it's an image type
+      if (!asset.mediaType.startsWith('image/')) {
+        console.warn(`Asset is not an image: ${src} (${asset.mediaType})`);
+        return null;
+      }
+
+      // Convert ArrayBuffer to Buffer if necessary
+      if (asset.data instanceof ArrayBuffer) {
+        return Buffer.from(asset.data);
+      }
+      
+      return asset.data as Buffer;
+    } catch (error) {
+      log('Failed to process image:', src, error);
+      return null;
+    }
+  }
 
   /**
    * Renders content text with basic formatting
@@ -387,7 +415,40 @@ export class EPUBToPDF {
     // Split content into lines and process each
     const lines = content.split('\n');
     
-    for (const line of lines) {
+      for (const line of lines) {
+        
+      // Handle images with improved regex for various markdown formats
+      const imageMatch = line.match(/!\[(.*?)\]\(([^)]+)\)/);
+      if (imageMatch) {
+        const [, alt, src] = imageMatch;
+        try {
+          const imageData = await this.processImage(src);
+          
+          if (imageData) {
+            // Calculate dimensions to fit within margins
+            const maxWidth = this.doc.page.width - this.options.margins.left - this.options.margins.right;
+            const maxHeight = this.doc.page.height / 2; // Limit to half page height by default
+
+            // Add some spacing before image
+            this.doc.moveDown();
+
+            // Add image centered on page
+            this.doc.image(imageData, {
+              fit: [maxWidth, maxHeight],
+              align: 'center',
+              valign: 'center'
+            });
+
+            // Add spacing after image
+            this.doc.moveDown();
+          }
+        } catch (error) {
+          log('Failed to add image to PDF:', error);
+          // Continue with text content even if image fails
+        }
+        continue;
+      }
+          
       // Handle headings
       if (line.startsWith('#')) {
         const level = line.match(/^#+/)?.[0].length || 1;
