@@ -108,6 +108,7 @@ export interface XMLNode {
   
   // File Data Type
 export type FileData = ArrayBuffer | Uint8Array | Blob;
+type PDFFontData = string | Buffer | ArrayBuffer | Uint8Array;
   
 /**
  * Configuration options for PDF generation
@@ -189,4 +190,20 @@ export interface PaginationConfig {
   footer?: PaginationSection;
   variables?: PaginationVariables;
   startPage?: number;
+}
+
+/**
+ * Types for font targeting
+ */
+export type BodyFontStyle = 'regular' | 'bold' | 'italic' | 'boldItalic';
+export type HeadingLevel = 'h1' | 'h2' | 'h3';
+export type FontTarget = `body-${BodyFontStyle}` | HeadingLevel;
+
+/**
+ * Interface for custom font registration
+ */
+export interface CustomFontData {
+  data: PDFFontData;
+  postscriptName: string;     // The PostScript name to register the font under
+  targets: FontTarget[];      // Array of places to use this font
 }

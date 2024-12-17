@@ -537,28 +537,19 @@ export class EPUBToPDF {
     }
    }
   
-  /**
+/**
  * Method to register a custom font with PDFKit
  * @param fontData Font configuration and data
  * @returns Promise resolving when font is registered
  */
 private async registerCustomFont(fontData: CustomFontData): Promise<void> {
   try {
-    // Convert FileData to Buffer if necessary
-    let fontBuffer: Buffer;
-    if (fontData.data instanceof ArrayBuffer) {
-      fontBuffer = Buffer.from(fontData.data);
-    } else if (fontData.data instanceof Uint8Array) {
-      fontBuffer = Buffer.from(fontData.data);
-    } else if (fontData.data instanceof Blob) {
-      const arrayBuffer = await fontData.data.arrayBuffer();
-      fontBuffer = Buffer.from(arrayBuffer);
-    } else {
-      fontBuffer = fontData.data;
-    }
 
-    // Register font with PDFKit
-    this.doc.registerFont(fontData.postscriptName, fontBuffer);
+    if (fontData.data instanceof Blob)
+      fontData.data = await fontData.data.arrayBuffer();
+    
+    // Register font with PDFKit directly using the provided data
+    this.doc.registerFont(fontData.postscriptName, fontData.data);
 
     // Update font configuration for each target
     for (const target of fontData.targets) {
