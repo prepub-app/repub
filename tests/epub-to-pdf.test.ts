@@ -38,12 +38,23 @@ describe('EPUBToPDF', () => {
         left: 72,
         right: 72
         },
-        fontSize:{
-            normal: 9,
-            heading1: 14,
-            heading2: 12,
-            heading3: 9
-      }
+        font: {
+            body: {
+              regular: 'Times-Roman',
+              bold: 'Times-Bold',
+              italic: 'Times-Italic',
+              boldItalic: 'Times-BoldItalic'
+            },
+            h1: 'Helvetica-Bold',
+            h2: 'Helvetica-Bold',
+            h3: 'Helvetica-Bold'
+          },
+          fontSize: {
+            body: 11,
+            h1: 24,
+            h2: 20,
+            h3: 16
+          }
     });
   });
 
@@ -127,28 +138,31 @@ describe('EPUBToPDF', () => {
         left: 50,
         right: 50
       },
-      fontSize: {
-        normal: 14,
-        heading1: 28,
-        heading2: 24,
-        heading3: 20
+      font: {
+        body: {
+          regular: 'Times-Roman',
+          bold: 'Times-Bold',
+          italic: 'Times-Italic',
+          boldItalic: 'Times-BoldItalic'
         },
+        h1: 'Helvetica-Bold',
+        h2: 'Helvetica-Bold',
+        h3: 'Helvetica-Bold'
+      },
+      fontSize: {
+        body: 11,
+        h1: 24,
+        h2: 20,
+        h3: 16
+      },
         pagination: {
             header: {
-              left: {
-                content: "{title}",
+              center: {
+                content: "{title} | {author}",
                 font: "Helvetica-Bold",
                 fontSize: 10,
                 color: "#333333",
-                alignment: "left",
-                margin: 10
-              },
-              right: {
-                content: "Chapter: {chapter}",
-                font: "Helvetica",
-                fontSize: 10,
-                color: "#333333",
-                alignment: "right",
+                alignment: "center",
                 margin: 10
               }
             },
@@ -182,6 +196,78 @@ describe('EPUBToPDF', () => {
     const outputPath = join(outputDir, 'test-output-custom.pdf');
     await writeFile(outputPath, pdfBuffer);
   });
+    
+  test('should register and apply custom fonts', async () => {
+    // Load custom fonts from fixtures
+    const openSansPath = resolve(__dirname, 'fixtures', 'fonts', 'OpenSans-Regular.ttf');
+    const openSansBoldPath = resolve(__dirname, 'fixtures', 'fonts', 'OpenSans-Bold.ttf');
+    const openSansItalicPath = resolve(__dirname, 'fixtures', 'fonts', 'OpenSans-Italic.ttf');
+    
+    const [regularFont, boldFont, italicFont] = await Promise.all([
+      readFile(openSansPath),
+      readFile(openSansBoldPath),
+      readFile(openSansItalicPath),
+    ]);
+  
+    // Create converter with default settings
+    const customFontConverter = new EPUBToPDF({
+      pageSize: 'A4',
+      margins: {
+        top: 72,
+        bottom: 72,
+        left: 72,
+        right: 72
+      },
+      // Start with standard fonts, we'll override with custom fonts
+      font: {
+        body: {
+          regular: 'Times-Roman',
+          bold: 'Times-Bold',
+          italic: 'Times-Italic',
+          boldItalic: 'Times-BoldItalic'
+        },
+        h1: 'Helvetica-Bold',
+        h2: 'Helvetica-Bold',
+        h3: 'Helvetica-Bold'
+      },
+      fontSize: {
+        body: 11,
+        h1: 24,
+        h2: 20,
+        h3: 16
+      }
+    });
+  
+    // Register custom fonts
+    await customFontConverter.registerFonts([
+      {
+        data: regularFont,
+        postscriptName: 'OpenSans',
+        targets: ['body-regular', 'h3'] // Use for regular text and h3 headings
+      },
+      {
+        data: boldFont,
+        postscriptName: 'OpenSans-Bold',
+        targets: ['body-bold', 'h1', 'h2'] // Use for bold text and h1/h2 headings
+      },
+      {
+        data: italicFont,
+        postscriptName: 'OpenSans-Italic',
+        targets: ['body-italic'] // Use for italic text
+      }
+    ]);
+  
+    // Convert EPUB with custom fonts
+    const pdfBuffer = await customFontConverter.convert(epub);
+  
+    // Basic verification
+    expect(pdfBuffer).toBeInstanceOf(Buffer);
+    expect(pdfBuffer.length).toBeGreaterThan(0);
+  
+    // Save PDF for manual inspection
+    const outputPath = join(outputDir, 'test-output-custom-fonts.pdf');
+    await writeFile(outputPath, pdfBuffer);
+  }, 30000); // Increase timeout for font loading and PDF generation
 
   // Cleanup generated files after all tests
   afterAll(async () => {

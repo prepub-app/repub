@@ -121,15 +121,21 @@ export interface PDFOptions {
     right: number;
   };
   font?: {
-    regular: string;
-    bold: string;
-    italic: string;
+    body: {
+      regular: string;
+      bold: string;
+      italic: string;
+      boldItalic?: string; // Optional support for bold+italic combination
+    };
+    h1?: string;
+    h2?: string;
+    h3?: string;
   };
   fontSize?: {
-    normal: number;
-    heading1: number;
-    heading2: number;
-    heading3: number;
+    body: number;
+    h1?: number;
+    h2?: number;
+    h3?: number;
   };
   pagination?: PaginationConfig;
 }

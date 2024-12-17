@@ -1,6 +1,6 @@
 import PDFDocument from 'pdfkit';
 import TurndownService from 'turndown';
-import { ContentElement, CoverImage, PDFOptions,PaginationVariables, PaginationSection, PaginationTextConfig } from './types';
+import { ContentElement, CoverImage, PDFOptions,PaginationVariables, PaginationSection, PaginationTextConfig, CustomFontData, BodyFontStyle, HeadingLevel, FontTarget } from './types';
 import { RePub } from './core';
 import debug from 'debug';
 import { Debugger } from 'debug';
@@ -17,7 +17,12 @@ export class EPUBToPDF {
     private currentChapterTitle: string = '';
     private metadata: any;
     private paginationVariables: PaginationVariables = {};
-    private epub: RePub | null = null;
+  private epub: RePub | null = null;
+  private standards = {
+    'h1': 18,
+    'h2': 16,
+    'h3': 14
+  }
 
   /**
    * Creates a new EPUBToPDF converter instance
@@ -34,17 +39,23 @@ export class EPUBToPDF {
         right: options.margins?.right || 72
       },
       font: {
-        regular: options.font?.regular || 'Helvetica',
-        bold: options.font?.bold || 'Helvetica-Bold',
-        italic: options.font?.italic || 'Helvetica-Oblique'
+        body: {
+          regular: options.font?.body?.regular || 'Helvetica',
+          bold: options.font?.body?.bold || 'Helvetica-Bold',
+          italic: options.font?.body?.italic || 'Helvetica-Oblique',
+          boldItalic: options.font?.body?.boldItalic || 'Helvetica-BoldOblique'
+        },
+        h1: options.font?.h1 || 'Helvetica-Bold',
+        h2: options.font?.h2 || 'Helvetica-Bold',
+        h3: options.font?.h3 || 'Helvetica-Bold'
       },
       fontSize: {
-        normal: options.fontSize?.normal || 10,
-        heading1: options.fontSize?.heading1 || 18,
-        heading2: options.fontSize?.heading2 || 16,
-        heading3: options.fontSize?.heading3 || 12
-        },
-        pagination: options.pagination || {}
+        body: options.fontSize?.body || 10,
+        h1: options.fontSize?.h1 || 18,
+        h2: options.fontSize?.h2 || 16,
+        h3: options.fontSize?.h3 || 12
+      },
+      pagination: options.pagination || {}
     };
 
     // Initialize PDF document
@@ -303,12 +314,13 @@ export class EPUBToPDF {
   private addTitlePage(metadata: any): void {
     this.doc.addPage();
     
-    const centerY = this.doc.page.height / 2;
+    const centerY = this.doc.page.height / 4;
     
     // Title
     this.doc
-      .font(this.options.font.bold)
-      .fontSize(this.options.fontSize.heading1)
+      .moveDown(centerY)
+      .font(this.options.font.h1 || this.options.font.body.bold)
+      .fontSize(this.options.fontSize.h1 || this.standards.h1)
       .text(metadata.title, {
         align: 'center',
         continued: false
@@ -318,7 +330,8 @@ export class EPUBToPDF {
     if (metadata.subtitle) {
       this.doc
         .moveDown()
-        .fontSize(this.options.fontSize.heading2)
+        .font(this.options.font.h2 || this.options.font.body.bold)
+        .fontSize(this.options.fontSize.h2 || this.standards.h2)
         .text(metadata.subtitle, {
           align: 'center',
           continued: false
@@ -329,8 +342,8 @@ export class EPUBToPDF {
     if (metadata.authors.length > 0) {
       this.doc
         .moveDown(2)
-        .font(this.options.font.regular)
-        .fontSize(this.options.fontSize.heading3)
+        .font(this.options.font.h2 || this.options.font.body.bold)
+        .fontSize(this.options.fontSize.h2 || this.standards.h2)
         .text(metadata.authors.join('\n'), {
           align: 'center',
           continued: false
@@ -341,7 +354,7 @@ export class EPUBToPDF {
     if (metadata.publisher) {
       this.doc
         .moveDown(2)
-        .fontSize(this.options.fontSize.normal)
+        .fontSize(this.options.fontSize.body)
         .text(metadata.publisher, {
           align: 'center',
           continued: false
@@ -402,49 +415,42 @@ export class EPUBToPDF {
     }
   }
 
-  /**
+   /**
    * Renders content text with basic formatting
    * @private
    * @param content Content text (Markdown)
    */
-  private async renderContent(content: string): Promise<void> {
+   private async renderContent(content: string): Promise<void> {
+    // Set default body font
     this.doc
-      .font(this.options.font.regular)
-      .fontSize(this.options.fontSize.normal);
+      .font(this.options.font.body.regular)
+      .fontSize(this.options.fontSize.body);
 
-    // Split content into lines and process each
     const lines = content.split('\n');
+    let isItalic = false;
+    let isBold = false;
     
-      for (const line of lines) {
-        
-      // Handle images with improved regex for various markdown formats
+    for (const line of lines) {
+      // Handle images
       const imageMatch = line.match(/!\[(.*?)\]\(([^)]+)\)/);
       if (imageMatch) {
         const [, alt, src] = imageMatch;
         try {
           const imageData = await this.processImage(src);
-          
           if (imageData) {
-            // Calculate dimensions to fit within margins
             const maxWidth = this.doc.page.width - this.options.margins.left - this.options.margins.right;
-            const maxHeight = this.doc.page.height / 2; // Limit to half page height by default
-
-            // Add some spacing before image
+            const maxHeight = this.doc.page.height / 2;
+            
             this.doc.moveDown();
-
-            // Add image centered on page
             this.doc.image(imageData, {
               fit: [maxWidth, maxHeight],
               align: 'center',
               valign: 'center'
             });
-
-            // Add spacing after image
             this.doc.moveDown();
           }
         } catch (error) {
           log('Failed to add image to PDF:', error);
-          // Continue with text content even if image fails
         }
         continue;
       }
@@ -454,35 +460,130 @@ export class EPUBToPDF {
         const level = line.match(/^#+/)?.[0].length || 1;
         const text = line.replace(/^#+\s*/, '');
         
+        // Only handle h1-h3, anything deeper uses h3 formatting
+        const headingLevel = Math.min(level, 3) as 1 | 2 | 3;
+        const fontKey = `h${headingLevel}` as 'h1' | 'h2' | 'h3';
+        
         this.doc
-          .font(this.options.font.bold)
-          .fontSize(this.options.fontSize[`heading${level}` as keyof typeof this.options.fontSize] || this.options.fontSize.normal)
+          .font(this.options.font[fontKey] || this.options.font.body.bold)
+          .fontSize(this.options.fontSize[fontKey] || this.standards[fontKey])
           .text(text, { continued: false })
           .moveDown();
+        
+        // Reset to body font
+        this.doc
+          .font(this.options.font.body.regular)
+          .fontSize(this.options.fontSize.body);
           
         continue;
       }
 
-      // Handle emphasis
-      let text = line
-        .replace(/\*\*(.*?)\*\*/g, (_, p1) => {
-          this.doc.font(this.options.font.bold);
-          return p1;
-        })
-        .replace(/\*(.*?)\*/g, (_, p1) => {
-          this.doc.font(this.options.font.italic);
-          return p1;
-        });
+      // Process text with emphasis
+      let segments: string[] = [];
+      let currentText = '';
+      let currentIndex = 0;
 
-      // Render line
-      if (text.trim()) {
-        this.doc.text(text, { continued: false });
-      } else {
+      // Helper function to apply current style and add text segment
+      const addSegment = (text: string, endOfLine: boolean = false) => {
+        if (!text) return;
+        
+        // Select appropriate font based on current style
+        let font = this.options.font.body.regular;
+        if (isBold && isItalic && this.options.font.body.boldItalic) {
+          font = this.options.font.body.boldItalic;
+        } else if (isBold) {
+          font = this.options.font.body.bold;
+        } else if (isItalic) {
+          font = this.options.font.body.italic;
+        }
+
+        this.doc
+          .font(font)
+          .text(text, { continued: !endOfLine });
+      };
+
+      while (currentIndex < line.length) {
+        // Look for bold/italic markers
+        if (line.substr(currentIndex).startsWith('**')) {
+          addSegment(currentText);
+          currentText = '';
+          isBold = !isBold;
+          currentIndex += 2;
+        } else if (line.substr(currentIndex).startsWith('*')) {
+          addSegment(currentText);
+          currentText = '';
+          isItalic = !isItalic;
+          currentIndex += 1;
+        } else {
+          currentText += line[currentIndex];
+          currentIndex += 1;
+        }
+      }
+
+      // Add remaining text
+      if (currentText) {
+        addSegment(currentText, true);
+      }
+
+      // Add line break if empty line
+      if (!line.trim()) {
         this.doc.moveDown();
       }
 
-      // Reset font
-      this.doc.font(this.options.font.regular);
+      // Reset styles at end of line
+      isBold = false;
+      isItalic = false;
+      this.doc.font(this.options.font.body.regular);
     }
+   }
+  
+  /**
+ * Method to register a custom font with PDFKit
+ * @param fontData Font configuration and data
+ * @returns Promise resolving when font is registered
+ */
+private async registerCustomFont(fontData: CustomFontData): Promise<void> {
+  try {
+    // Convert FileData to Buffer if necessary
+    let fontBuffer: Buffer;
+    if (fontData.data instanceof ArrayBuffer) {
+      fontBuffer = Buffer.from(fontData.data);
+    } else if (fontData.data instanceof Uint8Array) {
+      fontBuffer = Buffer.from(fontData.data);
+    } else if (fontData.data instanceof Blob) {
+      const arrayBuffer = await fontData.data.arrayBuffer();
+      fontBuffer = Buffer.from(arrayBuffer);
+    } else {
+      fontBuffer = fontData.data;
+    }
+
+    // Register font with PDFKit
+    this.doc.registerFont(fontData.postscriptName, fontBuffer);
+
+    // Update font configuration for each target
+    for (const target of fontData.targets) {
+      if (target.startsWith('body-')) {
+        const style = target.replace('body-', '') as BodyFontStyle;
+        this.options.font.body[style] = fontData.postscriptName;
+      } else {
+        this.options.font[target as HeadingLevel] = fontData.postscriptName;
+      }
+    }
+
+    log(`Registered custom font ${fontData.postscriptName} for targets: ${fontData.targets.join(', ')}`);
+  } catch (error) {
+    log('Failed to register custom font:', error);
+    throw new Error(`Failed to register custom font ${fontData.postscriptName}: ${error}`);
   }
+}
+
+/**
+ * Public method to register custom fonts
+ * @param fonts Array of custom fonts to register
+ * @returns Promise resolving when all fonts are registered
+ */
+public async registerFonts(fonts: CustomFontData[]): Promise<void> {
+  await Promise.all(fonts.map(font => this.registerCustomFont(font)));
+}
+  
 }
