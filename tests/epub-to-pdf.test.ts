@@ -19,7 +19,7 @@ describe('EPUBToPDF', () => {
     }
     
     // Load test EPUB file
-    const epubPath = resolve(__dirname, 'fixtures', 'moby-dick.epub');
+    const epubPath = resolve(__dirname, 'fixtures', 'sample_Remote_Kill.epub');
     epubData = await readFile(epubPath);
     
     // Initialize EPUB
@@ -211,7 +211,7 @@ describe('EPUBToPDF', () => {
   
     // Create converter with default settings
     const customFontConverter = new EPUBToPDF({
-      pageSize: 'A4',
+      pageSize: 'TRADE_6x9',
       margins: {
         top: 72,
         bottom: 72,

@@ -7,6 +7,22 @@ import { Debugger } from 'debug';
 
 const log: Debugger = debug('repub:pdf');
 
+// Standard paperback formats in points (1 inch = 72 points)
+export const PAPERBACK_FORMATS = {
+  MASS_MARKET: [324, 504] as [number, number],     // 4.25" x 7"
+  TRADE_5x8: [360, 576] as [number, number],       // 5" x 8"
+  TRADE_5_5x8_5: [396, 612] as [number, number],   // 5.5" x 8.5"
+  TRADE_6x9: [432, 648] as [number, number],       // 6" x 9"
+  ROYAL: [504, 720] as [number, number],           // 7" x 10"
+  US_LETTER: [612, 792] as [number, number],       // 8.5" x 11"
+  CROWN_QUARTO: [504, 666] as [number, number],    // 7" x 9.25"
+  DEMY: [445, 697] as [number, number],            // 6.18" x 9.67"
+} as const;
+
+// Type for paperback format keys
+export type PaperbackFormat = keyof typeof PAPERBACK_FORMATS;
+
+
 /**
  * Class for converting EPUB content to PDF
  */
@@ -31,7 +47,7 @@ export class EPUBToPDF {
   constructor(options: PDFOptions = {}) {
     // Set default options
     this.options = {
-      pageSize: options.pageSize || 'A4',
+      pageSize: this.resolvePaperbackFormat(options.pageSize),
       margins: {
         top: options.margins?.top || 72,    // 1 inch
         bottom: options.margins?.bottom || 72,
@@ -73,6 +89,26 @@ export class EPUBToPDF {
       bulletListMarker: '*',
       codeBlockStyle: 'fenced'
     });
+  }
+
+   /**
+   * Resolves a paperback format string to PDFKit page size
+   * @private
+   * @param format Format string or size array
+   * @returns PDFKit page size
+   */
+   private resolvePaperbackFormat(format: string | number[] | undefined): string | number[] {
+    if (!format) return 'A4';
+    if (Array.isArray(format)) return format;
+    
+    // Check if format is a paperback format key
+    if (format in PAPERBACK_FORMATS) {
+      // Create a new mutable array from the constant array
+      return [...PAPERBACK_FORMATS[format as PaperbackFormat]];
+    }
+    
+    // Return original format string if not a paperback format
+    return format;
   }
 
   /**
@@ -318,7 +354,7 @@ export class EPUBToPDF {
     
     // Title
     this.doc
-      .moveDown(centerY)
+      .moveDown()
       .font(this.options.font.h1 || this.options.font.body.bold)
       .fontSize(this.options.fontSize.h1 || this.standards.h1)
       .text(metadata.title, {
@@ -547,7 +583,7 @@ private async registerCustomFont(fontData: CustomFontData): Promise<void> {
 
     if (fontData.data instanceof Blob)
       fontData.data = await fontData.data.arrayBuffer();
-    
+
     // Register font with PDFKit directly using the provided data
     this.doc.registerFont(fontData.postscriptName, fontData.data);
 

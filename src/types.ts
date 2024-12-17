@@ -110,11 +110,29 @@ export interface XMLNode {
 export type FileData = ArrayBuffer | Uint8Array | Blob;
 type PDFFontData = string | Buffer | ArrayBuffer | Uint8Array;
   
+
+// Define the paperback format type
+export type PaperbackFormat = 
+  | 'MASS_MARKET'     // 4.25" x 7"
+  | 'TRADE_5x8'       // 5" x 8"
+  | 'TRADE_5_5x8_5'   // 5.5" x 8.5"
+  | 'TRADE_6x9'       // 6" x 9"
+  | 'ROYAL'           // 7" x 10"
+  | 'US_LETTER'       // 8.5" x 11"
+  | 'CROWN_QUARTO'    // 7" x 9.25"
+  | 'DEMY';           // 6.18" x 9.67"
+
+// Standard page sizes type
+export type StandardPageSize = 'A4' | 'A5' | 'LETTER';
+
+// Combined type for all possible page size options
+export type PageSize = StandardPageSize | PaperbackFormat | number[];
+
 /**
  * Configuration options for PDF generation
  */
 export interface PDFOptions {
-  pageSize?: 'A4' | 'A5' | 'LETTER';
+  pageSize?: PageSize;
   margins?: {
     top: number;
     bottom: number;
@@ -203,7 +221,7 @@ export type FontTarget = `body-${BodyFontStyle}` | HeadingLevel;
  * Interface for custom font registration
  */
 export interface CustomFontData {
-  data: PDFFontData;
+  data: FileData;
   postscriptName: string;     // The PostScript name to register the font under
   targets: FontTarget[];      // Array of places to use this font
 }
