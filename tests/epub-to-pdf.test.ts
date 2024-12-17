@@ -24,7 +24,9 @@ describe('EPUBToPDF', () => {
     
     // Initialize EPUB
     epub = new RePub();
-    await epub.load(epubData);
+      await epub.load(epubData);
+      const content = await epub.getContents(['chapter-001.xhtml'])
+      console.log(content)
   });
 
   // Setup before each test

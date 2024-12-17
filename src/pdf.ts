@@ -71,6 +71,13 @@ export class EPUBToPDF {
         h2: options.fontSize?.h2 || 16,
         h3: options.fontSize?.h3 || 12
       },
+      style: {
+        link: {
+          underline: false,
+          color: 'blue'
+        },
+        ...options.style
+      },
       pagination: options.pagination || {}
     };
 
@@ -324,11 +331,14 @@ export class EPUBToPDF {
    * @param cover Cover image data
    */
   private async addCover(cover: CoverImage): Promise<void> {
-    this.doc.addPage();
+    this.doc.addPage({
+      size: this.options.pageSize,
+      margin: 0
+    });
     
     // Calculate dimensions to fit page while maintaining aspect ratio
-    const pageWidth = this.doc.page.width - this.options.margins.left - this.options.margins.right;
-    const pageHeight = this.doc.page.height - this.options.margins.top - this.options.margins.bottom;
+    const pageWidth = this.doc.page.width //- this.options.margins.left - this.options.margins.right;
+    const pageHeight = this.doc.page.height // - this.options.margins.top - this.options.margins.bottom;
     
     try {
       // Add image centered on page
@@ -465,6 +475,9 @@ export class EPUBToPDF {
     const lines = content.split('\n');
     let isItalic = false;
     let isBold = false;
+    let isBlockquote = false;
+    let blockquoteIndent = this.options.style?.blockquote?.indent || 36; // Default 0.5 inch indent
+
     
     for (const line of lines) {
       // Handle images
@@ -514,12 +527,75 @@ export class EPUBToPDF {
         continue;
       }
 
-      // Process text with emphasis
-      let segments: string[] = [];
+   // Handle blockquotes
+   if (line.startsWith('>')) {
+    isBlockquote = true;
+    const textContent = line.substring(1).trim();
+    const blockquoteStyle = this.options.style?.blockquote;
+
+    // Save current position
+    const currentY = this.doc.y;
+
+    // Apply blockquote styling
+    if (blockquoteStyle) {
+      // Background
+      if (blockquoteStyle.background) {
+        this.doc
+          .rect(
+            this.options.margins.left,
+            currentY,
+            this.doc.page.width - this.options.margins.left - this.options.margins.right,
+            this.doc.currentLineHeight()
+          )
+          .fill(blockquoteStyle.background);
+      }
+
+      // Border
+      if (blockquoteStyle.borderColor && blockquoteStyle.borderWidth) {
+        this.doc
+          .rect(
+            this.options.margins.left,
+            currentY,
+            blockquoteStyle.borderWidth,
+            this.doc.currentLineHeight()
+          )
+          .fill(blockquoteStyle.borderColor);
+      }
+
+      // Font and text styling
+      if (blockquoteStyle.font) {
+        this.doc.font(blockquoteStyle.font);
+      }
+      if (blockquoteStyle.fontSize) {
+        this.doc.fontSize(blockquoteStyle.fontSize);
+      }
+      if (blockquoteStyle.color) {
+        this.doc.fillColor(blockquoteStyle.color);
+      }
+    }
+     // Add the text with indent
+     this.doc.text(textContent, 
+      this.options.margins.left + (this.options.style?.blockquote?.indent || 36),
+      currentY,
+      { continued: false }
+    );
+
+    // Reset styles
+    this.doc
+      .font(this.options.font.body.regular)
+      .fontSize(this.options.fontSize.body)
+      .fillColor('black');
+
+    continue;
+  } else {
+    isBlockquote = false;
+  }
+
+
+      // Process text with emphasis and links
       let currentText = '';
       let currentIndex = 0;
 
-      // Helper function to apply current style and add text segment
       const addSegment = (text: string, endOfLine: boolean = false) => {
         if (!text) return;
         
@@ -532,29 +608,112 @@ export class EPUBToPDF {
         } else if (isItalic) {
           font = this.options.font.body.italic;
         }
-
+  
         this.doc
           .font(font)
           .text(text, { continued: !endOfLine });
       };
-
+  
+      const addLink = (text: string, url: string, endOfLine: boolean = false) => {
+        const linkStyle = this.options.style?.link;
+        const currentY = this.doc.y;
+        const currentX = this.doc.x;
+  
+        // Apply link styling
+        if (linkStyle?.font) {
+          this.doc.font(linkStyle.font);
+        }
+        if (linkStyle?.fontSize) {
+          this.doc.fontSize(linkStyle.fontSize);
+        }
+        if (linkStyle?.color) {
+          this.doc.fillColor(linkStyle.color);
+        }
+  
+        // Add underline if specified
+        if (linkStyle?.underline !== false) {
+          this.doc.underline(
+            currentX,
+            currentY,
+            this.doc.widthOfString(text),
+            this.doc.currentLineHeight(),
+            { color: linkStyle?.color || 'blue' }
+          );
+        }
+  
+        // Add the link
+        this.doc
+          .link(currentX, currentY, this.doc.widthOfString(text), this.doc.currentLineHeight(), url)
+          .text(text, { continued: !endOfLine });
+  
+        // Reset styles
+        this.doc
+          .font(this.options.font.body.regular)
+          .fontSize(this.options.fontSize.body)
+          .fillColor('black');
+      };
+  
       while (currentIndex < line.length) {
-        // Look for bold/italic markers
-        if (line.substr(currentIndex).startsWith('**')) {
+        // Look for links first
+        const remainingText = line.substr(currentIndex);
+
+        // Check for escaped characters first
+      if (remainingText.startsWith('\\')) {
+        // Add any text before the escape
+        if (currentText) {
+          addSegment(currentText);
+          currentText = '';
+        }
+        
+        // Skip the escape character and add the next character literally
+        if (currentIndex + 1 < line.length) {
+          currentText = line[currentIndex + 1];
+          addSegment(currentText);
+          currentText = '';
+        }
+        
+        currentIndex += 2;
+        continue;
+      }
+        
+        const linkMatch = remainingText.match(/^\[([^\]]+)\]\(([^)]+)\)/);
+        
+        if (linkMatch) {
+          // Add any text before the link
+          addSegment(currentText);
+          currentText = '';
+          
+          // Add the link
+          const [fullMatch, text, url] = linkMatch;
+          addLink(text, url, false);
+          
+          currentIndex += fullMatch.length;
+          continue;
+        }
+  
+        // Look for bold markers (** or __)
+        if (remainingText.startsWith('**') || remainingText.startsWith('__')) {
           addSegment(currentText);
           currentText = '';
           isBold = !isBold;
           currentIndex += 2;
-        } else if (line.substr(currentIndex).startsWith('*')) {
+          continue;
+        }
+  
+        // Look for italic markers (* or _)
+        if ((remainingText.startsWith('*') && !remainingText.startsWith('**')) || 
+            (remainingText.startsWith('_') && !remainingText.startsWith('__'))) {
           addSegment(currentText);
           currentText = '';
           isItalic = !isItalic;
           currentIndex += 1;
-        } else {
-          currentText += line[currentIndex];
-          currentIndex += 1;
+          continue;
         }
-      }
+  
+        // Add current character to buffer
+        currentText += line[currentIndex];
+        currentIndex += 1;
+      }  
 
       // Add remaining text
       if (currentText) {
