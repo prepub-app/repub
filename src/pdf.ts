@@ -1,9 +1,26 @@
-import PDFDocument from 'pdfkit';
+import PDFDocument, { scale } from 'pdfkit';
 import TurndownService from 'turndown';
-import { ContentElement, CoverImage, PDFOptions,PaginationVariables, PaginationSection, PaginationTextConfig, CustomFontData, BodyFontStyle, HeadingLevel, FontTarget, alignment } from './types';
+import { ContentElement, CoverImage, PDFOptions,PaginationVariables, PaginationSection, PaginationTextConfig, CustomFontData, BodyFontStyle, HeadingLevel, ImageOptions, alignment, Margin, FileData } from './types';
 import { RePub } from './core';
+import { getMargin } from './helpers';
 import debug from 'debug';
 import { Debugger } from 'debug';
+import { imageDimensionsFromData } from 'image-dimensions';
+
+interface TextState {
+  font: string;
+  fontSize: number;
+  fillColor: string | PDFKit.Mixins.ColorValue;
+  x: number;
+  y: number;
+}
+
+interface TextSegment {
+  text: string;
+  isBold: boolean;
+  isItalic: boolean;
+  link?: { url: string };
+}
 
 const log: Debugger = debug('repub:pdf');
 
@@ -45,15 +62,13 @@ export class EPUBToPDF {
    * @param options Configuration options for PDF generation
    */
   constructor(options: PDFOptions = {}) {
+
+    let pageMargin = getMargin(options.margins ?? 72); // 1 inch
+
     // Set default options
     this.options = {
       pageSize: this.resolvePaperbackFormat(options.pageSize),
-      margins: {
-        top: options.margins?.top || 72,    // 1 inch
-        bottom: options.margins?.bottom || 72,
-        left: options.margins?.left || 72,
-        right: options.margins?.right || 72
-      },
+      margins: pageMargin,
       font: {
         body: {
           regular: options.font?.body?.regular || 'Helvetica',
@@ -86,13 +101,14 @@ export class EPUBToPDF {
         ...options.style
       },
       pagination: options.pagination || {},
-      addTitlePage: options.addTitlePage || false
+      addTitlePage: options.addTitlePage || false,
+      coverImage: options.coverImage || { displayMode : 'contain' }
     };
 
     // Initialize PDF document
     this.doc = new PDFDocument({
-      size: this.options.pageSize,
-      margins: this.options.margins,
+        size: this.options.pageSize,
+        margins: this.options.margins as { top: number; bottom: number; left: number; right: number },
         autoFirstPage: false,
         bufferPages: true
     });
@@ -340,7 +356,7 @@ export class EPUBToPDF {
    * @private
    * @param cover Cover image data
    */
-  private async addCover(cover: CoverImage): Promise<void> {
+  /*private async addCover(cover: CoverImage): Promise<void> {
 
     const customMargin = 10
 
@@ -362,7 +378,8 @@ export class EPUBToPDF {
     } catch (error) {
       log('Failed to add cover image:', error);
     }
-  }
+  }*/
+  
 
   /**
    * Adds a title page to the PDF
@@ -449,7 +466,7 @@ export class EPUBToPDF {
     }
   }
     
-  private async processImage(src: string): Promise<Buffer | null> {
+  private async processImage(src: string): Promise<ArrayBuffer | null> {
     if (!this.epub) return null;
 
     try {
@@ -462,16 +479,79 @@ export class EPUBToPDF {
       }
 
       // Convert ArrayBuffer to Buffer if necessary
-      if (asset.data instanceof ArrayBuffer) {
-        return Buffer.from(asset.data);
+      if (asset.data instanceof Uint8Array) {
+        return asset.data.buffer as ArrayBuffer
       }
       
-      return asset.data as Buffer;
+      return asset.data
     } catch (error) {
       log('Failed to process image:', src, error);
       return null;
     }
   }
+
+  private async addImage(
+    imageData: ArrayBuffer,
+    options: ImageOptions
+  ): Promise<void> {
+    const imageMargin = getMargin(options.margin ?? 0)
+    const height = ((options.maxSize?.height ?? this.doc.page.height) - imageMargin.top - imageMargin.bottom) 
+    const width = ((options.maxSize?.width ?? this.doc.page.width) - imageMargin.left - imageMargin.right)
+    try {
+      switch (options.displayMode) {
+        case 'contain':
+          this.doc.image(imageData, imageMargin.top, imageMargin.left, {
+            fit: [width, height],
+            align: options.position?.x ?? 'center',
+            valign: options.position?.y ?? 'center',
+          });
+          break;
+        default:
+          this.doc.image(imageData, imageMargin.top, imageMargin.left, {
+            cover: [width, height],
+            align: options.position?.x ?? 'center',
+            valign: options.position?.y ?? 'center',
+          });
+      }
+      // Add image centered on page
+      
+    } catch (error) {
+      log('Failed to add cover image:', error);
+    }
+  }
+
+  private async getImageDimensions(imageData: FileData): Promise<number[]> {
+    try {
+      let data = imageData
+      if (imageData instanceof Uint8Array) {
+        data = new Uint8Array(imageData)
+      }
+      const result = await imageDimensionsFromData(data as Uint8Array);
+      if (!result) throw new Error('Could not determine image dimensions');
+      return [result.width, result.height];
+    } catch (error) {
+      log('Failed to get image dimensions:', error);
+      throw error;
+    }
+  }
+
+  private async addCover(cover: CoverImage): Promise<void> {
+    const options = this.options.coverImage || { displayMode: 'contain' };
+    const data = cover.data instanceof Uint8Array ? cover.data.buffer as ArrayBuffer : cover.data;
+    if (this.options.coverImage.displayMode === 'native') {
+      const dimensions = await this.getImageDimensions(cover.data);
+      this.doc.addPage(
+        {
+          size: dimensions,
+          margin: 0
+        }
+      )
+    } else {
+      this.doc.addPage()
+    }
+      await this.addImage(data, options);
+    }
+
 
  /**
  * Renders content text with basic formatting
@@ -484,21 +564,25 @@ export class EPUBToPDF {
     .font(this.options.font.body.regular)
     .fontSize(this.options.fontSize.body);
 
-  const lines = content.split('\n');
-
-  interface TextState {
-    font: string;
-    fontSize: number;
-    fillColor: string | PDFKit.Mixins.ColorValue;
-    x: number;
-    y: number;
-  }
-
-  interface TextSegment {
-    text: string;
-    isBold: boolean;
-    isItalic: boolean;
-    link?: { url: string };
+   const lines = content.split('\n');
+   
+   // Check if content contains only an image
+   const nonEmptyLines = lines.filter(line => line.trim().length > 0);
+  if (nonEmptyLines.length === 1) {
+    const imageMatch = nonEmptyLines[0].match(/!\[(.*?)\]\(([^)]+)\)/);
+    if (imageMatch) {
+      const [, alt, src] = imageMatch;
+      const imageData = await this.processImage(src);
+      if (imageData) {
+        await this.addImage(
+          imageData,
+          {
+            displayMode: 'contain',
+          }
+        );
+      }
+      return;
+    }
   }
 
   // Track current text state
@@ -703,16 +787,10 @@ export class EPUBToPDF {
       try {
         const imageData = await this.processImage(src);
         if (imageData) {
-          const maxWidth = this.doc.page.width - this.options.margins.left - this.options.margins.right;
-          const maxHeight = this.doc.page.height / 2;
-          
-          this.doc.moveDown();
-          this.doc.image(imageData, {
-            fit: [maxWidth, maxHeight],
-            align: 'center',
-            valign: 'center'
-          });
-          this.doc.moveDown();
+          await this.addImage(
+            imageData,
+            { maxSize: { height: this.doc.page.height / 2 }, margin: getMargin(10) },
+          );
         }
       } catch (error) {
         log('Failed to add image to PDF:', error);
@@ -754,13 +832,14 @@ if (line.startsWith('>')) {
   const textContent = line.substring(1).trim();
   const blockquoteStyle = this.options.style?.blockquote;
   const leftPadding = blockquoteStyle?.indent === undefined ? 36 : blockquoteStyle.indent;
+  const margin: Margin = this.options.margins as Margin
   
   // Add left border/gap first
   if (blockquoteStyle?.borderColor && blockquoteStyle?.borderWidth) {
     const currentY = this.doc.y;
     this.doc
       .rect(
-        this.options.margins.left,
+        margin.left,
         currentY,
         blockquoteStyle.borderWidth,
         this.doc.currentLineHeight() * 1.5
@@ -769,7 +848,7 @@ if (line.startsWith('>')) {
   }
 
   // Set text position with proper left margin
-  this.doc.x = this.options.margins.left + leftPadding;
+  this.doc.x = margin.left + leftPadding;
   const currentY = this.doc.y;
   
   // Process text for formatting
@@ -777,9 +856,9 @@ if (line.startsWith('>')) {
   
   // Render formatted segments
   renderSegments(segments, {
-    x: this.options.margins.left + leftPadding,
+    x: margin.left + leftPadding,
     y: currentY,
-    width: this.doc.page.width - this.options.margins.left - this.options.margins.right - leftPadding,
+    width: this.doc.page.width - margin.left - margin.right - leftPadding,
     continued: false,
     align: blockquoteStyle?.align || this.options.style?.body?.align || 'left',
     customFont: blockquoteStyle?.font,

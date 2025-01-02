@@ -101,26 +101,35 @@ export interface XMLNode {
   
   // Cover Image Type
   export interface CoverImage {
-    data: Buffer;
+    data: FileData;
     mediaType: string;
     href: string;
   }
   
   // File Data Type
-export type FileData = ArrayBuffer | Uint8Array | Blob;
+export type FileData = ArrayBuffer | Uint8Array;
+
+export type ImageSizeMode = 'cover' | 'contain' | 'native'
+
+export interface ImageOptions {
+  displayMode?: ImageSizeMode;
+  margin?: Margin;
+  maxSize?:{height?:number, width?:number}
+  backgroundColor?: string;
+  position?: { x?: 'center' | 'right', y?: 'center' | 'bottom' };
+}
   
+
+export type MarginValue = number | string | { top?: number; bottom?: number; left?: number; right?: number };
+export type Margin = { top: number; bottom: number; left: number; right: number }
+
 
 /**
  * Configuration options for PDF generation
  */
 export interface PDFOptions {
   pageSize?: string | number[];
-  margins?: {
-    top: number;
-    bottom: number;
-    left: number;
-    right: number;
-  };
+  margins?: MarginValue | Margin;
   font?: {
     body: {
       regular: string;
@@ -162,6 +171,7 @@ export interface PDFOptions {
   };
   pagination?: PaginationConfig;
   addTitlePage?: boolean;
+  coverImage?: ImageOptions;
 }
 
 // Add new interface for pagination options

@@ -235,7 +235,8 @@ describe('EPUBToPDF', () => {
         h1: 24,
         h2: 20,
         h3: 16
-      }
+        },
+      coverImage : {displayMode:'contain'}
     });
   
     // Register custom fonts
