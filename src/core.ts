@@ -2017,185 +2017,76 @@ export class RePub {
     return orphanedItems.length;
   }
 
-  /**
-   * Updates broken links in content files after content removal
-   * @private
-   */
-  private async fixBrokenLinks(): Promise<void> {
-    if (!this.manifest) {
-      throw new Error('EPUB not loaded');
-    }
-
-    // Get all valid content hrefs from manifest
-    const validHrefs = new Set<string>(
-      Array.from(this.manifest.getElementsByTagName('item'))
-        .map(item => item.getAttribute('href'))
-        .filter((href): href is string => href !== null)
-        .map(href => this.path.join(this.path.dirname(this.contentPath), href))
-    );
-
-    // Get all content documents that might contain links
-    const contentItems = Array.from(this.manifest.getElementsByTagName('item'))
-      .filter(item => {
-        const mediaType = item.getAttribute('media-type');
-        return mediaType === 'application/xhtml+xml' || 
-               mediaType === 'text/html' ||
-               mediaType === 'text/css';
-      });
-
-    const parser = new DOMParser();
-    const serializer = new XMLSerializer();
-
-    for (const item of contentItems) {
-      const href = item.getAttribute('href');
-      if (!href) continue;
-
-      const contentPath = this.path.join(this.path.dirname(this.contentPath), href);
-      const contentFile = this.zip.file(contentPath);
-      if (!contentFile) continue;
-
-      let content = await contentFile.async('string');
-      
-      // Process content to handle entities
-      content = await this.processContentFile(content);
-
-      // Handle different content types
-      const mediaType = item.getAttribute('media-type');
-      let hasChanges = false;
-
-      if (mediaType === 'text/css') {
-        // Fix URLs in CSS files
-        hasChanges = await this.fixCssUrls(content, href, validHrefs);
-        if (hasChanges) {
-          this.zip.file(contentPath, content);
-        }
-      } else {
-        // Handle HTML/XHTML files
-        const doc = parser.parseFromString(content, 'application/xhtml+xml');
-        hasChanges = await this.fixHtmlLinks(doc, href, validHrefs);
-
-        if (hasChanges) {
-          const updatedContent = serializer.serializeToString(doc);
-          this.zip.file(contentPath, updatedContent);
-        }
-      }
-    }
+   /**
+ * Updates broken links in content files after content removal
+ * @private
+ */
+private async fixBrokenLinks(): Promise<void> {
+  if (!this.manifest) {
+    throw new Error('EPUB not loaded');
   }
 
-  /**
-   * Fixes URLs in CSS content
-   * @private
-   * @param content CSS content
-   * @param sourcePath Source file path
-   * @param validHrefs Set of valid href paths
-   * @returns Whether any changes were made
-   */
-  private async fixCssUrls(
-    content: string,
-    sourcePath: string,
-    validHrefs: Set<string>
-  ): Promise<boolean> {
-    let hasChanges = false;
-    const sourceDir = this.path.dirname(sourcePath);
+  // Get all valid content hrefs from manifest
+  const validHrefs = new Set<string>(
+    Array.from(this.manifest.getElementsByTagName('item'))
+      .map(item => item.getAttribute('href'))
+      .filter((href): href is string => href !== null)
+      .map(href => this.path.join(this.path.dirname(this.contentPath), href))
+  );
 
-    // Match url() patterns in CSS
-    const urlPattern = /url\(['"]?([^'")]+)['"]?\)/g;
-    content = content.replace(urlPattern, (match, url) => {
-      if (url.startsWith('data:') || url.startsWith('http')) {
-        return match;
-      }
-
-      const resolvedPath = this.path.join(sourceDir, url);
-      if (!validHrefs.has(resolvedPath)) {
-        hasChanges = true;
-        return 'url("")';
-      }
-
-      return match;
+  // Get all content documents that might contain links
+  const contentItems = Array.from(this.manifest.getElementsByTagName('item'))
+    .filter(item => {
+      const mediaType = item.getAttribute('media-type');
+      return mediaType === 'application/xhtml+xml' || 
+             mediaType === 'text/html';
     });
 
-    return hasChanges;
-  }
+  const parser = new DOMParser();
+  const serializer = new XMLSerializer();
 
-  /**
-   * Fixes links in HTML/XHTML content
-   * @private
-   * @param doc Parsed XML document
-   * @param sourcePath Source file path
-   * @param validHrefs Set of valid href paths
-   * @returns Whether any changes were made
-   */
-  private async fixHtmlLinks(
-    doc: Document,
-    sourcePath: string,
-    validHrefs: Set<string>
-  ): Promise<boolean> {
+  for (const item of contentItems) {
+    const href = item.getAttribute('href');
+    if (!href) continue;
+
+    const contentPath = this.path.join(this.path.dirname(this.contentPath), href);
+    const contentFile = this.zip.file(contentPath);
+    if (!contentFile) continue;
+
+    let content = await contentFile.async('string');
+    content = await this.processContentFile(content);
+    const doc = parser.parseFromString(content, 'application/xhtml+xml');
+
     let hasChanges = false;
-    const sourceDir = this.path.dirname(sourcePath);
 
     // Check all elements with href attributes
     const elementsWithHrefs = Array.from(doc.getElementsByTagName('*'))
-      .filter(el => el.hasAttribute('href') || el.hasAttribute('src'));
+      .filter(el => el.hasAttribute('href'));
 
     for (const element of elementsWithHrefs) {
-      // Handle href attributes
-      if (element.hasAttribute('href')) {
-        const href = element.getAttribute('href')!;
-        if (href === '#' || href.startsWith('http')) continue;
+      const linkHref = element.getAttribute('href');
+      if (!linkHref || linkHref === '#' || linkHref.startsWith('http')) continue;
 
-        const resolvedHref = this.path.join(sourceDir, href.split('#')[0]);
-        if (!validHrefs.has(resolvedHref)) {
-          element.setAttribute('href', '#');
-          hasChanges = true;
-        }
-      }
+      // Resolve the link relative to the current document
+      const resolvedHref = this.path.join(
+        this.path.dirname(contentPath),
+        linkHref.split('#')[0]
+      );
 
-      // Handle src attributes
-      if (element.hasAttribute('src')) {
-        const src = element.getAttribute('src')!;
-        if (src.startsWith('data:') || src.startsWith('http')) continue;
-
-        const resolvedSrc = this.path.join(sourceDir, src);
-        if (!validHrefs.has(resolvedSrc)) {
-          element.setAttribute('src', '');
-          hasChanges = true;
-        }
-      }
-    }
-
-    // Check inline styles for urls
-    const elementsWithStyle = Array.from(doc.getElementsByTagName('*'))
-      .filter(el => el.hasAttribute('style'));
-
-    for (const element of elementsWithStyle) {
-      const style = element.getAttribute('style')!;
-      const urlPattern = /url\(['"]?([^'")]+)['"]?\)/g;
-      
-      let newStyle = style;
-      let styleHasChanges = false;
-
-      newStyle = style.replace(urlPattern, (match, url) => {
-        if (url.startsWith('data:') || url.startsWith('http')) {
-          return match;
-        }
-
-        const resolvedUrl = this.path.join(sourceDir, url);
-        if (!validHrefs.has(resolvedUrl)) {
-          styleHasChanges = true;
-          return 'url("")';
-        }
-
-        return match;
-      });
-
-      if (styleHasChanges) {
-        element.setAttribute('style', newStyle);
+      // If the target doesn't exist in manifest, replace with #
+      if (!validHrefs.has(resolvedHref)) {
+        element.setAttribute('href', '#');
         hasChanges = true;
       }
     }
 
-    return hasChanges;
+    // If we made changes, save the updated content
+    if (hasChanges) {
+      const updatedContent = serializer.serializeToString(doc);
+      this.zip.file(contentPath, updatedContent);
+    }
   }
+}
 
   /**
    * Adds or updates an asset file in the EPUB
