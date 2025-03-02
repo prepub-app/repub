@@ -1,6 +1,6 @@
 {
   "name": "@prepub/repub",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A TypeScript module for manipulating EPUB files",
   "type": "module",
   "main": "./dist/index.js",
