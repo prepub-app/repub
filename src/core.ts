@@ -326,76 +326,40 @@ export class RePub {
     await this.buildContentsList();
   }
 
-  /**
-   * Builds the internal contents list from navigation documents
-   * @private
-   */
-  private async buildContentsList(): Promise<void> {
-    this.contents = [];
-    let index = 0;
+/**
+ * Builds the internal contents list from navigation documents
+ * @private
+ */
+private async buildContentsList(): Promise<void> {
+  this.contents = [];
+  let index = 0;
 
-    // Helper to determine content type from landmarks
-    const getLandmarkInfo = async (href: string): Promise<LandmarkInfo> => {
-      if (!this.navigation) return {};
+  // Helper to determine content type from landmarks
+  const getLandmarkInfo = async (href: string): Promise<LandmarkInfo> => {
+    if (!this.navigation) return {};
 
-      const landmarks = Array.from(
-        this.navigation.getElementsByTagName("nav")
-      ).find((nav) => nav.getAttribute("epub:type") === "landmarks");
+    const landmarks = Array.from(
+      this.navigation.getElementsByTagName("nav")
+    ).find((nav) => nav.getAttribute("epub:type") === "landmarks");
 
-      if (!landmarks) return {};
+    if (!landmarks) return {};
 
-      const links = Array.from(landmarks.getElementsByTagName("a"));
-      for (const link of links) {
-        const landmarkHref = link.getAttribute("href");
-        if (!landmarkHref) continue;
+    const links = Array.from(landmarks.getElementsByTagName("a"));
+    for (const link of links) {
+      const landmarkHref = link.getAttribute("href");
+      if (!landmarkHref) continue;
 
-        // Match either exact href or the file part without fragment
-        if (
-          landmarkHref === href ||
-          landmarkHref.split("#")[0] === href.split("#")[0]
-        ) {
-          const type = await this.processContentFile(
-            link.getAttribute("epub:type") || ""
-          );
-          if (!type) continue;
-
-          let contentType: ContentType | undefined;
-          if (type.includes("front")) contentType = "frontmatter";
-          else if (type.includes("back")) contentType = "backmatter";
-          else if (type.includes("body")) contentType = "bodymatter";
-
-          return {
-            type: contentType,
-            role: type,
-          };
-        }
-      }
-
-      return {};
-    };
-
-    // Helper to get content type from the document itself
-    const getContentType = async (href: string): Promise<LandmarkInfo> => {
-      const landmarkInfo = await getLandmarkInfo(href);
-      if (landmarkInfo.type) return landmarkInfo;
-
-      try {
-        const contentPath = this.path.join(
-          this.path.dirname(this.contentPath),
-          href.split("#")[0]
+      // Match either exact href or the file part without fragment
+      if (
+        landmarkHref === href ||
+        landmarkHref.split("#")[0] === href.split("#")[0]
+      ) {
+        const type = await this.processContentFile(
+          link.getAttribute("epub:type") || ""
         );
-        const contentFile = this.zip.file(contentPath);
-        if (!contentFile) return {};
+        if (!type) continue;
 
-        let content = await contentFile.async("string");
-        content = await this.processContentFile(content);
-
-        const bodyMatch = content.match(/<body[^>]*epub:type="([^"]*)"[^>]*>/);
-        if (!bodyMatch) return {};
-
-        const type = bodyMatch[1];
         let contentType: ContentType | undefined;
-
         if (type.includes("front")) contentType = "frontmatter";
         else if (type.includes("back")) contentType = "backmatter";
         else if (type.includes("body")) contentType = "bodymatter";
@@ -404,156 +368,82 @@ export class RePub {
           type: contentType,
           role: type,
         };
-      } catch {
-        return {};
-      }
-    };
-
-    const processNavigationChildren = async (
-      item: XMLElement,
-      currentIndex: number
-    ): Promise<[ContentElement[], number]> => {
-      const children: ContentElement[] = [];
-      let idx = currentIndex;
-
-      const nestedList = item.getElementsByTagName("ol")[0];
-      if (nestedList) {
-        const childItems = Array.from(nestedList.childNodes).filter(
-          (child) =>
-            child.nodeType === 1 && child.nodeName.toLowerCase() === "li"
-        );
-
-        for (const childItem of childItems) {
-          const anchor = childItem.getElementsByTagName("a")[0];
-          if (anchor) {
-            const href = anchor.getAttribute("href");
-            if (href) {
-              const [grandChildren, newIndex] = await processNavigationChildren(
-                childItem,
-                idx + 1
-              );
-
-              const { type, role } = await getContentType(href);
-              const label = await this.processContentFile(
-                anchor.textContent || `Item ${idx}`
-              );
-
-              const element: ContentElement = {
-                id: href.split("#")[0],
-                label,
-                href,
-                index: idx++,
-              };
-
-              if (type) element.type = type;
-              if (role) element.role = role;
-              if (grandChildren.length > 0) element.children = grandChildren;
-
-              children.push(element);
-              idx = newIndex;
-            }
-          }
-        }
-      }
-
-      return [children, idx];
-    };
-
-    if (this.navigation) {
-      const topLevelList = this.navigation.getElementsByTagName("ol")[0];
-      if (topLevelList) {
-        const topLevelItems = Array.from(topLevelList.childNodes).filter(
-          (child) =>
-            child.nodeType === 1 && child.nodeName.toLowerCase() === "li"
-        );
-
-        for (const item of topLevelItems) {
-          const anchor = item.getElementsByTagName("a")[0];
-          if (anchor) {
-            const href = anchor.getAttribute("href");
-            if (href) {
-              const [children, newIndex] = await processNavigationChildren(
-                item,
-                index + 1
-              );
-              const { type, role } = await getContentType(href);
-              const label = await this.processContentFile(
-                anchor.textContent || `Item ${index}`
-              );
-
-              const element: ContentElement = {
-                id: href.split("#")[0],
-                label,
-                href,
-                index: index++,
-              };
-
-              if (type) element.type = type;
-              if (role) element.role = role;
-              if (children.length > 0) element.children = children;
-
-              this.contents.push(element);
-              index = newIndex;
-            }
-          }
-        }
-      }
-    } else if (this.ncx) {
-      const navMap = this.ncx.getElementsByTagName("navMap")[0];
-
-      if (navMap) {
-        const topLevelPoints = Array.from(navMap.childNodes).filter(
-          (child) => child.nodeType === 1 && child.nodeName === "navPoint"
-        );
-
-        for (const navPoint of topLevelPoints) {
-          const [element, newIndex] = await this.processNCXNavPointWithType(
-            navPoint,
-            index,
-            getContentType
-          );
-          this.contents.push(element);
-          index = newIndex;
-        }
       }
     }
-  }
 
-  private async processNavigationChildrenWithType(
+    return {};
+  };
+
+  // Helper to get content type from the document itself
+  const getContentType = async (href: string): Promise<LandmarkInfo> => {
+    const landmarkInfo = await getLandmarkInfo(href);
+    if (landmarkInfo.type) return landmarkInfo;
+
+    try {
+      // FIXED: Strip fragment before constructing the path
+      const contentPath = this.path.join(
+        this.path.dirname(this.contentPath),
+        href.split("#")[0]  // Remove fragment before joining path
+      );
+      const contentFile = this.zip.file(contentPath);
+      if (!contentFile) return {};
+
+      let content = await contentFile.async("string");
+      content = await this.processContentFile(content);
+
+      const bodyMatch = content.match(/<body[^>]*epub:type="([^"]*)"[^>]*>/);
+      if (!bodyMatch) return {};
+
+      const type = bodyMatch[1];
+      let contentType: ContentType | undefined;
+
+      if (type.includes("front")) contentType = "frontmatter";
+      else if (type.includes("back")) contentType = "backmatter";
+      else if (type.includes("body")) contentType = "bodymatter";
+
+      return {
+        type: contentType,
+        role: type,
+      };
+    } catch {
+      return {};
+    }
+  };
+
+  const processNavigationChildren = async (
     item: XMLElement,
-    currentIndex: number,
-    getContentType: (href: string) => Promise<LandmarkInfo>
-  ): Promise<[ContentElement[], number]> {
+    currentIndex: number
+  ): Promise<[ContentElement[], number]> => {
     const children: ContentElement[] = [];
-    let index = currentIndex;
+    let idx = currentIndex;
 
     const nestedList = item.getElementsByTagName("ol")[0];
-
     if (nestedList) {
       const childItems = Array.from(nestedList.childNodes).filter(
-        (child) => child.nodeType === 1 && child.nodeName.toLowerCase() === "li"
+        (child) =>
+          child.nodeType === 1 && child.nodeName.toLowerCase() === "li"
       );
 
       for (const childItem of childItems) {
-        const childAnchor = childItem.getElementsByTagName("a")[0];
-
-        if (childAnchor) {
-          const href = childAnchor.getAttribute("href");
-
+        const anchor = childItem.getElementsByTagName("a")[0];
+        if (anchor) {
+          const href = anchor.getAttribute("href");
           if (href) {
-            const [grandChildren, newIndex] =
-              await this.processNavigationChildrenWithType(
-                childItem,
-                index + 1,
-                getContentType
-              );
+            const [grandChildren, newIndex] = await processNavigationChildren(
+              childItem,
+              idx + 1
+            );
+
             const { type, role } = await getContentType(href);
+            const label = await this.processContentFile(
+              anchor.textContent || `Item ${idx}`
+            );
 
             const element: ContentElement = {
               id: href.split("#")[0],
-              label: childAnchor.textContent || `Item ${index}`,
+              label,
               href,
-              index: index++,
+              index: idx++,
             };
 
             if (type) element.type = type;
@@ -561,65 +451,485 @@ export class RePub {
             if (grandChildren.length > 0) element.children = grandChildren;
 
             children.push(element);
-            index = newIndex;
+            idx = newIndex;
           }
         }
       }
     }
 
-    return [children, index];
+    return [children, idx];
+  };
+
+  if (this.navigation) {
+    const topLevelList = this.navigation.getElementsByTagName("ol")[0];
+    if (topLevelList) {
+      const topLevelItems = Array.from(topLevelList.childNodes).filter(
+        (child) =>
+          child.nodeType === 1 && child.nodeName.toLowerCase() === "li"
+      );
+
+      for (const item of topLevelItems) {
+        const anchor = item.getElementsByTagName("a")[0];
+        if (anchor) {
+          const href = anchor.getAttribute("href");
+          if (href) {
+            const [children, newIndex] = await processNavigationChildren(
+              item,
+              index + 1
+            );
+            const { type, role } = await getContentType(href);
+            const label = await this.processContentFile(
+              anchor.textContent || `Item ${index}`
+            );
+
+            const element: ContentElement = {
+              id: href.split("#")[0],
+              label,
+              href,
+              index: index++,
+            };
+
+            if (type) element.type = type;
+            if (role) element.role = role;
+            if (children.length > 0) element.children = children;
+
+            this.contents.push(element);
+            index = newIndex;
+          }
+        }
+      }
+    }
+  } else if (this.ncx) {
+    const navMap = this.ncx.getElementsByTagName("navMap")[0];
+
+    if (navMap) {
+      // FIXED: Get only the DIRECT children of navMap, not all descendants
+      const navMapChildren = Array.from(navMap.childNodes);
+      const topLevelPoints = navMapChildren.filter(
+        (child) => child.nodeType === 1 && child.nodeName === "navPoint"
+      );
+
+      for (const navPoint of topLevelPoints) {
+        const [element, newIndex] = await this.processNCXNavPointWithType(
+          navPoint,
+          index,
+          getContentType
+        );
+        
+        // Optional debugging code
+        /*
+        const navLabel = navPoint.getElementsByTagName("navLabel")[0];
+        const textEl = navLabel?.getElementsByTagName("text")[0];
+        const label = textEl?.textContent || "Unknown";
+        const contentEl = navPoint.getElementsByTagName("content")[0];
+        const src = contentEl?.getAttribute("src") || "";
+        console.log(`Processing navPoint: ${label}, src: ${src}, id: ${element.id}`);
+        */
+        
+        this.contents.push(element);
+        index = newIndex;
+      }
+    }
+  }
+}
+
+/**
+ * Processes an NCX navigation point and its children
+ * @private
+ * @param navPoint Navigation point element to process
+ * @param currentIndex Current index in the content list
+ * @param getContentType Function to determine content type
+ * @returns Tuple of processed element and new index
+ */
+private async processNCXNavPointWithType(
+  navPoint: XMLElement,
+  currentIndex: number,
+  getContentType: (href: string) => Promise<LandmarkInfo>
+): Promise<[ContentElement, number]> {
+  const textElement = navPoint.getElementsByTagName("text")[0];
+  const contentElement = navPoint.getElementsByTagName("content")[0];
+  const src = contentElement?.getAttribute("src");
+  let index = currentIndex;
+
+  const children: ContentElement[] = [];
+  
+  // FIXED: Get ALL navPoint children, not just direct node children
+  // Need to make sure we only get direct children, not all descendants
+  const childNavPoints = Array.from(navPoint.getElementsByTagName("navPoint"));
+  
+  // Filter to only include direct children
+  const directChildNavPoints = childNavPoints.filter(child => child.parentNode === navPoint);
+  
+  for (const childPoint of directChildNavPoints) {
+    const [childElement, newIndex] = await this.processNCXNavPointWithType(
+      childPoint,
+      index + 1,
+      getContentType
+    );
+    children.push(childElement);
+    index = newIndex;
   }
 
-  private async processNCXNavPointWithType(
-    navPoint: XMLElement,
-    currentIndex: number,
-    getContentType: (href: string) => Promise<LandmarkInfo>
-  ): Promise<[ContentElement, number]> {
-    const textElement = navPoint.getElementsByTagName("text")[0];
-    const contentElement = navPoint.getElementsByTagName("content")[0];
-    const src = contentElement?.getAttribute("src");
-    let index = currentIndex;
+  const { type = undefined, role = undefined } = src
+    ? await getContentType(src)
+    : {};
 
-    const children: ContentElement[] = [];
-    const childNavPoints = Array.from(navPoint.childNodes).filter(
-      (child) => child.nodeType === 1 && child.nodeName === "navPoint"
+  // FIXED: Make sure we're handling the fragment identifiers correctly
+  // Use the full src as href, but strip fragment for ID
+  const srcWithoutFragment = src ? src.split("#")[0] : "";
+  
+  const element: ContentElement = {
+    id: srcWithoutFragment || "",
+    label: textElement?.textContent || `Item ${index}`,
+    href: src || "", // Keep the full src including fragment
+    index: index++,
+  };
+
+  if (type) element.type = type;
+  if (role) element.role = role;
+  if (children.length > 0) element.children = children;
+
+  return [element, index];
+}
+
+private async processNavigationChildrenWithType(
+  item: XMLElement,
+  currentIndex: number,
+  getContentType: (href: string) => Promise<LandmarkInfo>
+): Promise<[ContentElement[], number]> {
+  const children: ContentElement[] = [];
+  let index = currentIndex;
+
+  const nestedList = item.getElementsByTagName("ol")[0];
+
+  if (nestedList) {
+    const childItems = Array.from(nestedList.childNodes).filter(
+      (child) => child.nodeType === 1 && child.nodeName.toLowerCase() === "li"
     );
 
-    for (const childPoint of childNavPoints) {
-      const [childElement, newIndex] = await this.processNCXNavPointWithType(
-        childPoint,
-        index + 1,
-        getContentType
-      );
-      children.push(childElement);
-      index = newIndex;
+    for (const childItem of childItems) {
+      const childAnchor = childItem.getElementsByTagName("a")[0];
+
+      if (childAnchor) {
+        const href = childAnchor.getAttribute("href");
+
+        if (href) {
+          const [grandChildren, newIndex] =
+            await this.processNavigationChildrenWithType(
+              childItem,
+              index + 1,
+              getContentType
+            );
+          const { type, role } = await getContentType(href);
+
+          // FIXED: Use consistent fragment handling here too
+          const hrefWithoutFragment = href.split("#")[0];
+          
+          const element: ContentElement = {
+            id: hrefWithoutFragment,
+            label: childAnchor.textContent || `Item ${index}`,
+            href,
+            index: index++,
+          };
+
+          if (type) element.type = type;
+          if (role) element.role = role;
+          if (grandChildren.length > 0) element.children = grandChildren;
+
+          children.push(element);
+          index = newIndex;
+        }
+      }
+    }
+  }
+
+  return [children, index];
+}
+
+ /**
+ * Fixed implementation for flattened content that:
+ * 1. Excludes parent elements that have children (to avoid duplication)
+ * 2. Ensures indices are consecutive
+ * 3. Preserves the content order according to the spine
+ */
+
+/**
+ * Gets a flattened list of content elements in spine order
+ * @private
+ * @returns Array of content elements
+ */
+private getFlattenedContents(): ContentElement[] {
+  if (!this.spine || !this.manifest) {
+    return [];
+  }
+
+  // Get spine items in order
+  const spineItems = Array.from(this.spine.getElementsByTagName("itemref"))
+    .map((item) => item.getAttribute("idref"))
+    .filter((id): id is string => id !== null);
+
+  // Array to hold flattened contents in spine order
+  const flattenedContents: ContentElement[] = [];
+  
+  // Create a map of all content elements (including nested ones) for quick lookup
+  const allContentElements = new Map<string, ContentElement>();
+  
+  // Set to keep track of parent elements (those that have children)
+  const parentElements = new Set<string>();
+  
+  // Helper function to collect all content elements recursively
+  const collectElements = (elements: ContentElement[]) => {
+    for (const element of elements) {
+      // Add to our content map
+      allContentElements.set(element.id, element);
+      
+      if (element.children && element.children.length > 0) {
+        // Mark as a parent element
+        parentElements.add(element.id);
+        
+        // Process children
+        collectElements(element.children);
+      }
+    }
+  };
+  
+  // Collect all elements
+  collectElements(this.contents);
+  
+  // Process spine items in order
+  for (const idref of spineItems) {
+    // Find the corresponding manifest item
+    const manifestItem = Array.from(this.manifest.getElementsByTagName("item"))
+      .find((item) => item.getAttribute("id") === idref);
+    
+    if (manifestItem) {
+      const href = manifestItem.getAttribute("href");
+      if (href) {
+        const hrefWithoutFragment = href.split("#")[0];
+        
+        // Find content element by matching the href (without fragment)
+        const matchingElements = Array.from(allContentElements.values())
+          .filter((element) => element.id === hrefWithoutFragment);
+        
+        for (const element of matchingElements) {
+          // Skip parent elements unless specifically requested
+          if (!parentElements.has(element.id)) {
+            flattenedContents.push({
+              ...element,
+              children: undefined // Remove children array
+            });
+          }
+        }
+      }
+    }
+  }
+  
+  // Reindex elements consecutively
+  flattenedContents.forEach((element, index) => {
+    element.index = index;
+  });
+  
+  return flattenedContents;
+}
+
+/**
+ * Special version of getFlattenedContents that keeps parent elements
+ * This is used when content retrieval specifically needs parent elements
+ * @private
+ */
+private getFlattenedContentsWithParents(): ContentElement[] {
+  if (!this.spine || !this.manifest) {
+    return [];
+  }
+
+  // Get spine items in order
+  const spineItems = Array.from(this.spine.getElementsByTagName("itemref"))
+    .map((item) => item.getAttribute("idref"))
+    .filter((id): id is string => id !== null);
+
+  // Get all content elements with their IDs for quick lookup
+  const allContentElements = new Map<string, ContentElement>();
+  
+  // Helper function to collect all content elements recursively
+  const collectElements = (elements: ContentElement[]) => {
+    for (const element of elements) {
+      // Only store each ID once (in case of duplicates)
+      if (!allContentElements.has(element.id)) {
+        allContentElements.set(element.id, { 
+          ...element, 
+          children: undefined // Remove children array
+        });
+      }
+      
+      if (element.children && element.children.length > 0) {
+        // Process children
+        collectElements(element.children);
+      }
+    }
+  };
+  
+  // Collect all elements
+  collectElements(this.contents);
+  
+  // Array to hold flattened contents in spine order
+  const flattenedContents: ContentElement[] = [];
+  
+  // Process spine items in order
+  for (const idref of spineItems) {
+    // Find the corresponding manifest item
+    const manifestItem = Array.from(this.manifest.getElementsByTagName("item"))
+      .find((item) => item.getAttribute("id") === idref);
+    
+    if (manifestItem) {
+      const href = manifestItem.getAttribute("href");
+      if (href) {
+        const hrefWithoutFragment = href.split("#")[0];
+        
+        // Find content element by ID
+        const element = allContentElements.get(hrefWithoutFragment);
+        
+        if (element) {
+          flattenedContents.push(element);
+        }
+      }
+    }
+  }
+  
+  // Reindex elements consecutively
+  flattenedContents.forEach((element, index) => {
+    element.index = index;
+  });
+  
+  return flattenedContents;
+}
+
+/**
+ * Returns the list of content elements
+ * @param options Configuration options for content listing
+ * @returns Array of ContentElement objects representing the EPUB structure
+ */
+listContents(options: { 
+  flatten?: boolean;
+  includeParents?: boolean;
+} = {flatten: true}): ContentElement[] {
+  if (options.flatten) {
+    return options.includeParents ? 
+      this.getFlattenedContentsWithParents() : 
+      this.getFlattenedContents();
+  }
+  return this.contents;
+}
+
+/**
+ * Retrieves content from specified elements or all elements in the EPUB
+ * @param identifiers Optional array of element IDs or indices to retrieve
+ * @param options Optional configuration for content retrieval
+ * @returns Promise resolving to either a Map of ID => content or merged content string
+ */
+async getContents(
+  identifiers?: (string | number)[],
+  options: {
+    merge?: boolean;
+    flatten?: boolean;
+    includeParents?: boolean;
+  } = { flatten: true }
+): Promise<Map<string, string> | string> {
+  if (!this.manifest || !this.spine) {
+    throw new Error("EPUB not loaded");
+  }
+
+  const turndownService = new TurndownService({
+    headingStyle: "atx",
+    hr: "---",
+    bulletListMarker: "*",
+    codeBlockStyle: "fenced",
+  });
+
+  // Handle identifiers based on specified options
+  let contentsToProcess: ContentElement[] = [];
+  
+  if (identifiers) {
+    // Process specific identifiers
+    contentsToProcess = identifiers.map((identifier) => {
+      if (typeof identifier === "number") {
+        const element = this.findContentElementByIndex(identifier);
+        if (!element) {
+          throw new Error(`Element with index ${identifier} not found`);
+        }
+        return element;
+      } else {
+        const element = this.findContentElementById(identifier);
+        if (!element) {
+          throw new Error(`Element with ID ${identifier} not found`);
+        }
+        return element;
+      }
+    });
+  } else {
+    // Get all contents based on flatten option
+    contentsToProcess = this.listContents({ 
+      flatten: options.flatten,
+      includeParents: options.includeParents
+    });
+  }
+  
+  const contentMap = new Map<string, string>();
+
+  // Process each content element
+  for (const element of contentsToProcess) {
+    const contentPath = this.path.join(
+      this.path.dirname(this.contentPath),
+      element.href.split("#")[0]
+    );
+
+    const contentFile = this.zip.file(contentPath);
+    if (!contentFile) {
+      // Skip files that don't exist rather than throwing an error
+      continue;
     }
 
-    const { type = undefined, role = undefined } = src
-      ? await getContentType(src)
-      : {};
+    let htmlContent = await contentFile.async("string");
 
-    const element: ContentElement = {
-      id: src?.split("#")[0] || "",
-      label: textElement?.textContent || `Item ${index}`,
-      href: src || "",
-      index: index++,
-    };
+    // Process content to handle entities
+    htmlContent = await this.processContentFile(htmlContent);
 
-    if (type) element.type = type;
-    if (role) element.role = role;
-    if (children.length > 0) element.children = children;
-
-    return [element, index];
+    // Extract body content and convert to Markdown
+    const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    if (bodyMatch) {
+      contentMap.set(element.id, turndownService.turndown(bodyMatch[1]));
+    } else {
+      contentMap.set(element.id, "");
+    }
   }
 
-  /**
-   * Returns the current list of content elements
-   * @returns Array of ContentElement objects representing the EPUB structure
-   */
-  listContents(): ContentElement[] {
-    return this.contents;
+  return options.merge
+    ? Array.from(contentMap.values()).join("\n\n---\n\n")
+    : contentMap;
+}
+/**
+ * Finds a content element by its ID
+ * @private
+ * @param id ID to search for
+ * @param elements Array of content elements to search through
+ * @returns Found ContentElement or null if not found
+ */
+private findContentElementById(
+  id: string,
+  elements: ContentElement[] = this.contents
+): ContentElement | null {
+  for (const element of elements) {
+    if (element.id === id) {
+      return element;
+    }
+    if (element.children) {
+      const found = this.findContentElementById(id, element.children);
+      if (found) {
+        return found;
+      }
+    }
   }
+  return null;
+}
 
   /**
    * Removes a range of content elements
@@ -1056,77 +1366,7 @@ export class RePub {
     await this.buildContentsList();
   }
 
-  /**
-   * Retrieves content from specified elements or all elements in the EPUB
-   * @param identifiers Optional array of element IDs or indices to retrieve
-   * @param merge Optional boolean to merge all content into a single string
-   * @returns Promise resolving to either a Map of ID => content or merged content string
-   */
-  async getContents(
-    identifiers?: (string | number)[],
-    merge: boolean = false
-  ): Promise<Map<string, string> | string> {
-    if (!this.manifest || !this.spine) {
-      throw new Error("EPUB not loaded");
-    }
 
-    const turndownService = new TurndownService({
-      headingStyle: "atx",
-      hr: "---",
-      bulletListMarker: "*",
-      codeBlockStyle: "fenced",
-    });
-
-    const contentIds = identifiers?.map((identifier) => {
-      if (typeof identifier === "number") {
-        const element = this.findContentElementByIndex(identifier);
-        if (!element) {
-          throw new Error(`Element with index ${identifier} not found`);
-        }
-        return element.id;
-      }
-      return identifier;
-    });
-
-    const idsToRetrieve =
-      contentIds || this.contents.map((element) => element.id);
-    const contentMap = new Map<string, string>();
-
-    // Process each content file
-    for (const id of idsToRetrieve) {
-      const content = this.contents.find((element) => element.id === id);
-      if (!content) {
-        throw new Error(`Content element with ID ${id} not found`);
-      }
-
-      const contentPath = this.path.join(
-        this.path.dirname(this.contentPath),
-        content.href.split("#")[0]
-      );
-
-      const contentFile = this.zip.file(contentPath);
-      if (!contentFile) {
-        throw new Error(`Content file not found: ${contentPath}`);
-      }
-
-      let htmlContent = await contentFile.async("string");
-
-      // Process content to handle entities
-      htmlContent = await this.processContentFile(htmlContent);
-
-      // Extract body content and convert to Markdown
-      const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-      if (bodyMatch) {
-        contentMap.set(id, turndownService.turndown(bodyMatch[1]));
-      } else {
-        contentMap.set(id, "");
-      }
-    }
-
-    return merge
-      ? Array.from(contentMap.values()).join("\n\n---\n\n")
-      : contentMap;
-  }
 
   /**
    * Normalizes whitespace in XML elements recursively
